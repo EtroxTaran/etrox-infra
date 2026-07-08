@@ -1,0 +1,30 @@
+---
+# 10_postgres_n8n — PostgreSQL für n8n (statt SQLite, weil Migration sauberer)
+
+- name: Ensure postgres data dir
+  ansible.builtin.file:
+    path: "{{ n8n_postgres_data_dir }}"
+    state: directory
+    owner: "1002"   # n8n user
+    group: "1002"
+    mode: "0750"
+
+- name: Render postgres compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ n8n_postgres_data_dir }}/../docker-compose.yml"
+    mode: "0644"
+
+- name: Start postgres
+  community.docker.docker_compose_v2:
+    project_src: "/opt/n8n"
+    services: [postgres-n8n]
+    state: present
+
+- name: Wait for postgres to accept connections
+  ansible.builtin.command: docker exec postgres-n8n pg_isready -U {{ vault_postgres.n8n_user }}
+  register: pg_ready
+  retries: 30
+  delay: 2
+  until: pg_ready.rc == 0
+  changed_when: false

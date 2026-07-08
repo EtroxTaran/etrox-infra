@@ -1,0 +1,70 @@
+---
+# 17_cli_tools — Coding-CLIs für agent + devrunner Users.
+
+- name: Install Node.js LTS (NodeSource)
+  ansible.builtin.shell: |
+    if ! node -v 2>/dev/null | grep -qE '^v(20|22|24)'; then
+      curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -
+      apt-get install -y nodejs
+      echo CHANGED
+    fi
+  register: node_install
+  changed_when: "'CHANGED' in node_install.stdout"
+
+- name: Install pnpm + bun (system-wide)
+  ansible.builtin.shell: |
+    npm install -g pnpm
+    curl -fsSL https://bun.sh/install | bash || true
+  args:
+    creates: /usr/local/lib/node_modules/pnpm
+
+- name: Verify CLI npm packages exist before install (avoid npm 404 mid-playbook)
+  ansible.builtin.command: "npm view {{ item }} version"
+  loop:
+    - "@anthropic-ai/claude-code"
+    - "@openai/codex"
+    - "@google/gemini-cli"
+  register: npm_pkg_check
+  changed_when: false
+  failed_when: false
+
+- name: Compute installable list (only packages found on npm registry)
+  ansible.builtin.set_fact:
+    installable_clis: "{{ npm_pkg_check.results | selectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+    skipped_clis:     "{{ npm_pkg_check.results | rejectattr('rc', 'equalto', 0) | map(attribute='item') | list }}"
+
+- name: Warn about CLIs that are not on npm
+  ansible.builtin.debug:
+    msg: "ℹ️ Diese CLIs wurden auf npm nicht gefunden und werden übersprungen: {{ skipped_clis }} — manuell installieren falls benötigt."
+  when: skipped_clis | length > 0
+
+- name: Install available coding CLIs globally via npm
+  community.general.npm:
+    name: "{{ item }}"
+    global: true
+    state: latest
+  loop: "{{ installable_clis }}"
+
+- name: Install GitHub CLI
+  ansible.builtin.apt:
+    name: gh
+    state: present
+    update_cache: true
+
+- name: Install Google Cloud CLI
+  ansible.builtin.shell: |
+    set -e
+    if ! command -v gcloud >/dev/null; then
+      curl https://sdk.cloud.google.com | bash -s -- --disable-prompts --install-dir=/opt
+      ln -sf /opt/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud
+      echo CHANGED
+    fi
+  register: gcloud_install
+  changed_when: "'CHANGED' in gcloud_install.stdout"
+
+- name: Install Cursor CLI (via npm wrapper, optional)
+  community.general.npm:
+    name: "@cursor/cli"
+    global: true
+    state: present
+  failed_when: false   # Cursor CLI gibt's evtl. nicht auf npm — placeholder

@@ -1,0 +1,27 @@
+---
+# 03_systemd_slices — cgroup-v2 Limits pro User-Slice.
+
+- name: Ensure user slice drop-in dirs exist
+  ansible.builtin.file:
+    path: "/etc/systemd/system/user-{{ item.uid }}.slice.d"
+    state: directory
+    mode: "0755"
+  loop: "{{ system_users }}"
+  loop_control:
+    label: "user-{{ item.uid }}.slice ({{ item.name }})"
+
+- name: Render slice limits drop-ins
+  ansible.builtin.template:
+    src: limits.conf.j2
+    dest: "/etc/systemd/system/user-{{ item.uid }}.slice.d/limits.conf"
+    mode: "0644"
+  loop: "{{ slice_limits }}"
+  loop_control:
+    label: "{{ item.user }}"
+  vars:
+    target_user: "{{ system_users | selectattr('name', 'equalto', item.user) | first }}"
+  notify: reload systemd
+
+- name: Reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true

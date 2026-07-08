@@ -1,0 +1,103 @@
+---
+# 22_agent_stack — Hermes (Orchestrator) + Subscription-CLIs (Execution-Layer).
+# Hermes (Nous Research) ersetzt OpenClaw. Die eigentliche KI-Arbeit delegiert Hermes
+# an Abo-authentifizierte CLIs (claude/codex/gemini/grok/cursor) → KEIN API-Billing.
+# Einzige API-Ausnahme: Perplexity. Vollständige Doku: docs/AGENT-STACK.md.
+
+- name: Ensure agent state dirs (auf /data)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ agent_user | default('agent') }}"
+    group: "{{ agent_user | default('agent') }}"
+    mode: "0750"
+  loop:
+    - "{{ agent_state_root | default('/data/agent') }}"
+    - "{{ hermes_state_dir | default('/data/agent/hermes') }}"
+
+- name: Check npm is available (von bootstrap.sh installiert)
+  ansible.builtin.command: bash -lc 'command -v npm'
+  register: npm_check
+  changed_when: false
+  failed_when: false
+
+- name: Fail early if npm missing
+  ansible.builtin.assert:
+    that: npm_check.rc == 0
+    fail_msg: "npm/node fehlt — bitte zuerst ./bootstrap.sh ausführen (installiert Node LTS)."
+
+# --- KRITISCH: kein API-Key im agent-Kontext → CLIs nutzen Abo statt API ---
+- name: Guard — unset forbidden API keys for the agent user (Abo statt API-Billing)
+  ansible.builtin.blockinfile:
+    path: "/home/{{ agent_user | default('agent') }}/.profile"
+    create: true
+    owner: "{{ agent_user | default('agent') }}"
+    group: "{{ agent_user | default('agent') }}"
+    mode: "0644"
+    marker: "# {mark} ANSIBLE MANAGED agent api-key guard"
+    block: |
+      # Subscription-only: diese CLIs MÜSSEN über OAuth/Abo laufen, nicht über API.
+      # Daher die API-Key-Env defensiv leeren. Perplexity ist die bewusste Ausnahme
+      # und wird hier NICHT entfernt.
+      {% for env in agent_forbidden_api_envs %}
+      unset {{ env }} 2>/dev/null || true
+      {% endfor %}
+
+- name: Install subscription coding CLIs (npm global)
+  ansible.builtin.command: "npm install -g {{ item.pkg }}"
+  loop: "{{ subscription_clis }}"
+  loop_control:
+    label: "{{ item.name }} ({{ item.pkg }})"
+  register: cli_install
+  changed_when: "'changed' in cli_install.stdout or 'added' in cli_install.stdout"
+  failed_when: false   # Grok Build ist Beta; einzelne Pakete dürfen fehlen
+
+- name: Install Cursor CLI (offizieller Installer, nicht npm)
+  ansible.builtin.shell: |
+    set -e
+    if command -v cursor-agent >/dev/null 2>&1; then echo NOOP; exit 0; fi
+    curl -fsSL https://cursor.com/install | bash
+    echo CHANGED
+  become_user: "{{ agent_user | default('agent') }}"
+  register: cursor_install
+  changed_when: "'CHANGED' in cursor_install.stdout"
+  failed_when: false
+
+# --- Hermes Agent --------------------------------------------------------
+- name: Install Hermes Agent (native)
+  ansible.builtin.shell: |
+    set -e
+    if command -v hermes >/dev/null 2>&1; then echo NOOP; exit 0; fi
+    curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+    echo CHANGED
+  become_user: "{{ agent_user | default('agent') }}"
+  environment:
+    HERMES_STATE_DIR: "{{ hermes_state_dir | default('/data/agent/hermes') }}"
+  register: hermes_install
+  changed_when: "'CHANGED' in hermes_install.stdout"
+  when: (hermes_deploy_mode | default('native')) == 'native'
+  failed_when: false
+
+- name: Pull Hermes Agent docker image (docker mode)
+  community.docker.docker_image:
+    name: nousresearch/hermes-agent
+    source: pull
+  when: (hermes_deploy_mode | default('native')) == 'docker'
+
+# --- Manuelle Schritte (OAuth-Logins + OpenClaw-Migration sind interaktiv) ---
+- name: Print agent-stack manual steps
+  ansible.builtin.debug:
+    msg:
+      - "⚠️ Manuelle Schritte als User '{{ agent_user | default('agent') }}' (Browser nötig — Desktop vorhanden):"
+      - "  1. Abo-Logins (KEINE API-Keys setzen!):"
+      - "       claude login            # Claude Max"
+      - "       codex login             # 'Sign in with ChatGPT' (privates Abo)"
+      - "       gemini                  # Google-Konto"
+      - "       grok login              # SuperGrok / X Premium+ (Beta)"
+      - "       cursor-agent login      # Cursor Pro"
+      - "     Verify: 'claude'/'codex'/'grok' Status zeigt 'subscription', NICHT API-Key."
+      - "  2. OpenClaw → Hermes Migration (nach R2D2-Migration in /home/agent/.openclaw):"
+      - "       hermes claw migrate     # zieht Fleet (Nathan/Lisa/Riker/Spock/Dax)"
+      - "  3. Hermes-Provider: Ollama als Gratis-Aux, Perplexity-MCP für Suche."
+      - "  4. Default-Coder = Claude Code; Hermes delegiert via 'claude -p' / 'codex exec' / 'grok -p'."
+      - "  Details: docs/AGENT-STACK.md"

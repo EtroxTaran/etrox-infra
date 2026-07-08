@@ -1,0 +1,87 @@
+---
+# 19_gaming — Steam + Proton(-GE) für die menschlichen User (nico, sabine).
+# Steam via apt .deb (NICHT Flatpak) für sauberen NVIDIA/Vulkan/32-bit-Zugriff.
+# Civ 7 läuft über Proton; Details + ProtonDB-Check in docs/GAMING.md.
+
+- name: Ensure i386 multiarch is enabled (Steam/Proton 32-bit)
+  ansible.builtin.command: dpkg --add-architecture i386
+  register: ma
+  changed_when: "'already' not in ma.stderr | default('')"
+
+- name: Enable multiverse + restricted components (Steam liegt in multiverse)
+  ansible.builtin.command: "add-apt-repository -y {{ item }}"
+  loop:
+    - multiverse
+    - restricted
+  register: repos
+  changed_when: "'already' not in repos.stderr | default('')"
+
+- name: Pre-accept Steam EULA (non-interactive install)
+  ansible.builtin.debconf:
+    name: steam
+    question: "{{ item.q }}"
+    value: "{{ item.v }}"
+    vtype: "{{ item.t }}"
+  loop:
+    - { q: "steam/question", v: "I AGREE", t: "select" }
+    - { q: "steam/license", v: "", t: "note" }
+
+- name: Install Steam + gaming tooling
+  ansible.builtin.apt:
+    name:
+      - steam-installer
+      - gamemode
+      - mangohud
+      - vulkan-tools
+      - mesa-utils
+      - libgl1-mesa-dri:i386
+    state: present
+    update_cache: true
+  failed_when: false   # i386-Pakete ggf. erst nach Multiarch-Refresh verfügbar
+
+- name: Ensure shared Steam library dir exists (auf /data)
+  ansible.builtin.file:
+    path: "{{ steam_library_dir | default('/data/games') }}"
+    state: directory
+    owner: root
+    group: games
+    mode: "2775"
+
+# --- Proton-GE (GloriousEggroll) — bessere Kompatibilität für neue AAA-Titel ---
+- name: Get latest Proton-GE release tag
+  ansible.builtin.shell: |
+    curl -s https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases/latest \
+      | jq -r .tag_name
+  register: ge_tag
+  changed_when: false
+  when: proton_ge_install | default(true) | bool
+
+- name: Install Proton-GE for each human user
+  ansible.builtin.shell: |
+    set -e
+    TAG="{{ ge_tag.stdout }}"
+    DEST="/home/{{ item }}/.steam/root/compatibilitytools.d"
+    if [[ -d "$DEST/$TAG" ]]; then echo NOOP; exit 0; fi
+    mkdir -p "$DEST"
+    cd /tmp
+    curl -fsSL -o "ge-$TAG.tar.gz" \
+      "https://github.com/GloriousEggroll/proton-ge-custom/releases/download/$TAG/$TAG.tar.gz"
+    tar -xzf "ge-$TAG.tar.gz" -C "$DEST"
+    rm -f "ge-$TAG.tar.gz"
+    echo CHANGED
+  loop: "{{ human_users }}"
+  become_user: "{{ item }}"
+  register: ge_install
+  changed_when: "'CHANGED' in ge_install.stdout"
+  when:
+    - proton_ge_install | default(true) | bool
+    - ge_tag.stdout | default('') != ''
+  failed_when: false   # erstes Steam-Verzeichnis entsteht erst nach Steam-Erststart
+
+- name: Gaming summary
+  ansible.builtin.debug:
+    msg:
+      - "✅ Steam (.deb) + gamemode + mangohud installiert."
+      - "Steam-Library: {{ steam_library_dir | default('/data/games') }}"
+      - "Proton-GE {{ ge_tag.stdout | default('(übersprungen)') }} pro User installiert."
+      - "Civ 7 / ProtonDB-Hinweise: docs/GAMING.md"

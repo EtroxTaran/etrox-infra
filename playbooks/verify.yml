@@ -1,0 +1,191 @@
+---
+# verify.yml — End-to-End Health Checks. Soll nach jedem site.yml/update.yml laufen.
+
+- name: AI-Server health checks
+  hosts: ai_server
+  become: false
+  gather_facts: false
+
+  tasks:
+    - name: nvidia-smi reports GPU
+      ansible.builtin.command: nvidia-smi --query-gpu=name,driver_version,temperature.gpu --format=csv,noheader
+      register: gpu_info
+      changed_when: false
+      tags: [gpu]
+
+    - ansible.builtin.debug: { var: gpu_info.stdout }
+
+    - name: Docker GPU passthrough works
+      ansible.builtin.command: docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu24.04 nvidia-smi
+      register: docker_gpu
+      changed_when: false
+      failed_when: docker_gpu.rc != 0
+      tags: [gpu, docker]
+
+    - name: Ollama list models
+      ansible.builtin.uri:
+        url: "http://localhost:11434/api/tags"
+        return_content: true
+      register: ollama_tags
+      tags: [ollama]
+
+    - name: Ollama has expected models
+      ansible.builtin.assert:
+        that:
+          - "'qwen3' in (ollama_tags.json.models | map(attribute='name') | join(','))"
+        fail_msg: "qwen3 nicht in ollama installiert"
+      tags: [ollama]
+
+    - name: n8n-private healthz
+      ansible.builtin.uri:
+        url: "http://{{ ansible_default_ipv4.address }}:5678/healthz"
+        status_code: 200
+      tags: [n8n]
+
+    - name: SurrealDB health
+      ansible.builtin.uri:
+        url: "http://localhost:8000/health"
+        status_code: 200
+      tags: [surrealdb]
+
+    - name: restic repo healthy
+      ansible.builtin.command: restic -r /data/backups/local --password-file /etc/restic/password check --read-data-subset=1%
+      register: restic_check
+      changed_when: false
+      failed_when: restic_check.rc != 0
+      become: true
+      tags: [restic]
+
+    - name: Tailscale up and connected
+      ansible.builtin.command: tailscale status --json
+      register: ts_status
+      changed_when: false
+      tags: [tailscale]
+
+    - name: Tailscale Hetzner reachable
+      ansible.builtin.command: tailscale ping -c 2 "{{ hetzner_tailnet_ip }}"
+      register: ts_ping_hetzner
+      changed_when: false
+      failed_when: ts_ping_hetzner.rc != 0
+      tags: [tailscale]
+
+    - name: ACL self-test — Hetzner can reach AI-Server n8n port
+      ansible.builtin.command: >-
+        ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new
+        {{ vault_hetzner_admin_user | default('root') }}@{{ hetzner_tailnet_ip }}
+        "curl -sf -o /dev/null -w '%{http_code}' --max-time 5 http://{{ ansible_default_ipv4.address }}:5678/healthz || echo BLOCKED"
+      register: acl_self_test
+      changed_when: false
+      failed_when: "'BLOCKED' in acl_self_test.stdout or '200' not in acl_self_test.stdout"
+      tags: [tailscale, acl]
+      # Wenn dieser Schritt fehlschlägt:
+      # - Tailscale-ACL aus roles/06_tailscale/files/tailscale-acl.hujson ist nicht gepflegt, oder
+      # - n8n hört nicht auf der Tailscale-IP, oder
+      # - UFW auf AI-Server blockiert den Tailscale-Traffic
+      ignore_errors: true   # nicht hart-fail, nur Warnung — gut für ersten Run vor Hetzner-Edge
+
+    - name: systemd-Slices for managed users active
+      ansible.builtin.command: "systemctl is-active user-{{ item.uid }}.slice"
+      loop: "{{ system_users }}"
+      register: slice_status
+      changed_when: false
+      failed_when: false
+      tags: [slices]
+
+    # ---------------- Workstation-Layer (Desktop/Gaming/GPU) ----------------
+    - name: Vulkan userspace works (Desktop-Treiber, nicht -server)
+      ansible.builtin.shell: "vulkaninfo --summary 2>/dev/null | grep -m1 deviceName || true"
+      register: vulkan_info
+      changed_when: false
+      failed_when: false
+      tags: [gpu, desktop]
+
+    - name: NVIDIA DRM KMS (modeset) aktiv für Wayland
+      ansible.builtin.command: cat /sys/module/nvidia_drm/parameters/modeset
+      register: drm_modeset
+      changed_when: false
+      failed_when: false
+      tags: [gpu, desktop]
+
+    - name: SDDM display manager enabled
+      ansible.builtin.command: systemctl is-enabled sddm
+      register: sddm_enabled
+      changed_when: false
+      failed_when: false
+      tags: [desktop]
+
+    - name: Default systemd target is graphical
+      ansible.builtin.command: systemctl get-default
+      register: default_target
+      changed_when: false
+      failed_when: false
+      tags: [desktop]
+
+    - name: GPU-Arbiter target installed
+      ansible.builtin.stat:
+        path: /etc/systemd/system/gpu-heavy.target
+      register: gpu_heavy_target
+      tags: [gpu, gpu_arbiter]
+
+    - name: Steam installed
+      ansible.builtin.command: dpkg-query -W -f='${Status}' steam-installer
+      register: steam_pkg
+      changed_when: false
+      failed_when: false
+      tags: [gaming]
+
+    # ----------------------------- Agent-Stack ------------------------------
+    - name: Agent desktop/browser services active (Xvfb/Chrome/VNC)
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      loop:
+        - agent-xvfb.service
+        - agent-chrome.service
+        - agent-vnc.service
+      register: agent_services
+      changed_when: false
+      failed_when: false
+      tags: [agent, agent_browser]
+
+    - name: Agent Chrome CDP endpoint reachable (localhost:9222)
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:9222/json/version"
+        status_code: 200
+      register: cdp_check
+      failed_when: false
+      tags: [agent, agent_browser]
+
+    - name: Hermes + subscription CLIs present for agent
+      ansible.builtin.command: "bash -lc 'command -v hermes claude codex cursor-agent gemini grok'"
+      become: true
+      become_user: "{{ agent_user | default('agent') }}"
+      register: agent_clis
+      changed_when: false
+      failed_when: false
+      tags: [agent, agent_stack]
+
+    - name: API-key guard — forbidden *_API_KEY must be EMPTY in agent context
+      ansible.builtin.command: >-
+        bash -lc 'env | grep -E "^({{ agent_forbidden_api_envs | join('|') }})=" || true'
+      become: true
+      become_user: "{{ agent_user | default('agent') }}"
+      register: agent_api_leak
+      changed_when: false
+      failed_when: agent_api_leak.stdout | trim != ''
+      tags: [agent, agent_stack]
+      # Schlägt bewusst FEHL, wenn ein API-Key gesetzt ist → sonst läuft die CLI
+      # auf API-Billing statt Abo. Fix: roles/22_agent_stack Guard prüfen.
+
+    - name: Print verification summary
+      ansible.builtin.debug:
+        msg: |
+          ✅ GPU:          {{ gpu_info.stdout }}
+          ✅ Vulkan:       {{ vulkan_info.stdout | default('n/a') | trim }}
+          ✅ Ollama:       {{ ollama_tags.json.models | length }} models
+          ✅ Desktop:      sddm={{ sddm_enabled.stdout | default('?') }}, default={{ default_target.stdout | default('?') }}, drm_modeset={{ drm_modeset.stdout | default('?') | trim }}
+          ✅ GPU-Arbiter:  gpu-heavy.target {{ 'present' if gpu_heavy_target.stat.exists else 'MISSING' }}
+          ✅ Steam:        {{ 'installed' if 'install ok' in (steam_pkg.stdout | default('')) else 'n/a' }}
+          ✅ Agent CDP:    {{ 'reachable' if (cdp_check.status | default(0)) == 200 else 'n/a (Login/Service?)' }}
+          ✅ Agent CLIs:   {{ 'ok' if (agent_clis.rc | default(1)) == 0 else 'unvollständig (Abo-Login offen?)' }}
+          ✅ API-Guard:    kein *_API_KEY im agent-Kontext
+          ✅ Tailscale OK
+          ✅ restic check: passed

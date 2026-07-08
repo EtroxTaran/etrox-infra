@@ -1,0 +1,19 @@
+# Vault-Tier-Policy — gilt für vaultctl + MCP-Server.
+# Kein Vault hier listed = kein Schreibzugriff.
+
+vaults:
+{% for v in vault_definitions %}
+  - name: {{ v.name }}
+    path: {{ vault_root }}/{{ v.name }}
+    tier: {{ v.tier }}
+    git_enabled: {{ v.git | lower }}
+    remote_sync: {{ v.remote_sync | lower }}
+    write_via_mcp: {{ 'true' if v.tier == 'low' else 'false' }}
+{% endfor %}
+
+# personal-reflection ist BEWUSST nicht aufgeführt → MCP-forbidden.
+
+policy:
+  required_frontmatter: [title, created, tags, source]
+  audit_log: /data/vaults/.audit.jsonl
+  git_commit_template: "vaultctl: {action} {vault}/{path}"

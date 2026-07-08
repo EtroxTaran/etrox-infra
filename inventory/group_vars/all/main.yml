@@ -1,0 +1,269 @@
+---
+# Nicht-sensitive Defaults — werden ins Repo committet.
+# Sensitive Werte: siehe inventory/group_vars/all/vault.yml (ansible-vault encrypted).
+
+# --- Tailnet -------------------------------------------------------------
+tailnet_name: example-net.ts.net
+tailnet_subnet: "100.64.0.0/10"
+
+# Hetzner public-edge
+hetzner_tailnet_host: "etrox.{{ tailnet_name }}"
+hetzner_tailnet_ip: "100.64.0.10"
+hetzner_tag: "public-edge"
+
+# R2D2 home-control
+r2d2_tailnet_host: "r2d2.{{ tailnet_name }}"
+r2d2_tailnet_ip: "100.64.0.20"
+r2d2_lan_ip: "192.168.1.12"
+r2d2_tag: "home-control"
+
+# AI-Server
+ai_server_hostname: "ai-server"
+ai_server_tag: "ai-server"
+ai_server_advertise_routes:
+  - "192.168.1.0/24"     # lokales LAN
+
+# --- Users (UIDs explizit, weil rsync von R2D2 mit gemappten UIDs läuft) ---
+# admin_user = der bei der Ubuntu-Desktop-Installation angelegte Erst-User (uid 1000).
+# Auf dieser Maschine heißt er 'nico'. (NICHT verwechseln mit der Hetzner-Identität 'etrox'.)
+admin_user: nico
+admin_uid: 1000
+
+system_users:
+  - name: nico
+    uid: 1000
+    comment: "Primary admin + human desktop user (Nico)"
+    groups: [sudo, docker, video, audio, render, plugdev, games]
+    shell: /bin/bash
+    create_home: true
+  - name: sabine
+    uid: 1007
+    comment: "Human desktop user (Sabine) — Gaming + DaVinci, kein sudo"
+    groups: [video, audio, render, plugdev, games]
+    shell: /bin/bash
+    create_home: true
+  - name: agent
+    uid: 1001
+    comment: "Hermes agent fleet runtime + isolierte Browser-Session"
+    groups: [docker]
+    shell: /bin/bash
+    create_home: true
+  - name: n8n
+    uid: 1002
+    comment: "n8n private service"
+    groups: [docker]
+    shell: /bin/bash
+    create_home: true
+  - name: devrunner
+    uid: 1003
+    comment: "GitHub Actions self-hosted runner"
+    groups: [docker]
+    shell: /bin/bash
+    create_home: true
+  - name: ollama
+    uid: 1004
+    comment: "Ollama LLM inference (GPU)"
+    groups: [docker, video]
+    shell: /bin/bash
+    create_home: true
+  - name: davinci
+    uid: 1005
+    comment: "DaVinci Resolve Studio + Python API"
+    groups: [video, audio]
+    shell: /bin/bash
+    create_home: true
+  - name: surreal
+    uid: 1006
+    comment: "SurrealDB"
+    groups: [docker]
+    shell: /bin/bash
+    create_home: true
+
+# Menschliche Desktop-User (bekommen KDE-Login, Steam, DaVinci-GUI).
+# Wird von roles/18_desktop + roles/19_gaming iteriert. nico ist zusätzlich Admin.
+human_users:
+  - nico
+  - sabine
+
+# --- Storage layout (siehe roles/01_storage + docs/DISK-LAYOUT.md) ------
+# Mounts werden per LABEL identifiziert, nicht per Device-Path/UUID — damit
+# der OS-Umzug auf eine dedizierte SSD später ohne fstab-Änderung klappt.
+#
+# Topologie:
+#   single_disk_4tb  — OS und /data auf derselben 4 TB NVMe (Start-Layout)
+#   split_os_data    — OS auf dedizierter SSD, /data auf 4 TB (Ziel-Layout
+#                      nach OS-SSD-MIGRATION.md)
+# Beide nutzen dieselben Labels: os, data, EFI.
+#
+# Ab Hardware-Stand Juni 2026: beide NVMe verbaut (1 TB OS + 4 TB data) →
+# wir starten DIREKT im split_os_data-Layout. Der OS-SSD-Migrationspfad
+# (docs/OS-SSD-MIGRATION.md) entfällt damit (siehe dort: als erledigt markiert).
+storage_topology: "split_os_data"
+
+# Pflicht-Mountpoints, die roles/01_storage validiert.
+# 'expected_partition_label' = LABEL der Partition, die diesen Pfad trägt.
+storage_mounts:
+  - mountpoint: /var/lib/docker
+    purpose: "Docker images/layers"
+    expected_partition_label: "os"
+  - mountpoint: /opt/n8n
+    purpose: "n8n persistent data"
+    expected_partition_label: "os"
+  - mountpoint: /opt/ollama
+    purpose: "Ollama service files (small models)"
+    expected_partition_label: "os"
+  - mountpoint: /opt/surreal
+    purpose: "SurrealDB"
+    expected_partition_label: "os"
+  - mountpoint: /data/projects
+    purpose: "Git repos, node_modules"
+    expected_partition_label: "data"
+  - mountpoint: /data/builds
+    purpose: "npm cache, dist artifacts"
+    expected_partition_label: "data"
+  - mountpoint: /data/vaults
+    purpose: "Obsidian/markdown vaults"
+    expected_partition_label: "data"
+  - mountpoint: /data/models
+    purpose: "Large Ollama models"
+    expected_partition_label: "data"
+  - mountpoint: /data/davinci
+    purpose: "DaVinci scratch + media"
+    expected_partition_label: "data"
+  - mountpoint: /data/games
+    purpose: "Steam libraries + Proton (nico, sabine)"
+    expected_partition_label: "data"
+  - mountpoint: /data/agent
+    purpose: "Hermes state + agent chrome profile (uid 1001)"
+    expected_partition_label: "data"
+  - mountpoint: /data/backups
+    purpose: "restic repo"
+    expected_partition_label: "data"
+
+# Die zwei Filesystems, die wirklich eigene Mounts haben (alle storage_mounts
+# oben sind Pfade INNERHALB dieser zwei FS).
+storage_required_labels:
+  - os
+  - data
+
+# --- Docker -------------------------------------------------------------
+docker_data_root: /var/lib/docker
+docker_log_max_size: "10m"
+docker_log_max_file: 3
+docker_networks:
+  - { name: agent-net,      driver: bridge }
+  - { name: dev-net,        driver: bridge }
+  - { name: ollama-net,     driver: bridge }
+  - { name: davinci-net,    driver: bridge }
+  - { name: surreal-net,    driver: bridge }
+  - { name: monitoring-net, driver: bridge }
+
+# --- Ollama -------------------------------------------------------------
+ollama_models_dir: /data/models
+ollama_default_models:
+  - qwen3:14b
+  - gemma3:12b
+  - llama3.2-vision:11b
+
+# --- n8n ----------------------------------------------------------------
+n8n_data_dir: /opt/n8n/data
+n8n_postgres_data_dir: /opt/n8n/postgres
+n8n_listen_address: "0.0.0.0"   # auf Tailscale-IP einschränken in host_vars/ai-server
+n8n_port: 5678
+n8n_timezone: "Europe/Berlin"
+n8n_public_webhook_url: "https://n8n-gw.{{ public_domain | default('example.com') }}"
+
+# --- SurrealDB ---------------------------------------------------------
+surreal_data_dir: /opt/surreal
+surreal_port: 8000
+
+# --- Vaults (von R2D2 zu migrieren) -----------------------------------
+# owner = Linux-User, dem der Vault gehört. high-tier Sabine-Vaults gehören
+# 'sabine' (menschlicher Desktop-User), der Rest dem 'agent'-Runtime-User.
+vault_root: /data/vaults
+vault_owner_default: agent
+vault_definitions:
+  - { name: research-core,         tier: low,  git: true,  remote_sync: true,  owner: agent  }
+  - { name: nico-operations,       tier: high, git: true,  remote_sync: false, owner: nico   }
+  - { name: sabine-jobs-design,    tier: high, git: true,  remote_sync: false, owner: sabine }
+  - { name: family-business,       tier: mid,  git: true,  remote_sync: false, owner: agent  }
+  - { name: real-estate-knowledge, tier: mid,  git: true,  remote_sync: false, owner: agent  }
+  - { name: vacation-planning,     tier: mid,  git: true,  remote_sync: false, owner: agent  }
+  - { name: claude-code-research,  tier: low,  git: true,  remote_sync: true,  owner: agent  }
+  - { name: sabine-lisa,           tier: high, git: true,  remote_sync: false, owner: sabine }
+  - { name: _world,                tier: low,  git: true,  remote_sync: true,  owner: agent  }
+  # personal-reflection wird BEWUSST nicht aufgelistet (lock tier, kein MCP).
+
+# --- Agent-Stack: Hermes (Orchestrator) + Subscription-CLIs -------------
+# Hermes (Nous Research) ersetzt OpenClaw. Migration via `hermes claw migrate`.
+# KI-Arbeit läuft über Abo-authentifizierte CLIs (kein API-Billing).
+# Details: docs/AGENT-STACK.md
+agent_user: agent
+agent_state_root: /data/agent
+hermes_state_dir: /data/agent/hermes
+hermes_deploy_mode: native        # native | docker
+hermes_migrate_from_openclaw: true
+
+# Coding-CLIs, die für den agent-User installiert + per OAuth (Abo) eingeloggt werden.
+# WICHTIG: für diese gilt NIEMALS ein *_API_KEY env im agent-Kontext (sonst API-Billing).
+subscription_clis:
+  - { name: claude-code, pkg: "@anthropic-ai/claude-code", bin: claude,       login: "claude login",  default: true  }
+  - { name: codex,       pkg: "@openai/codex",             bin: codex,        login: "codex login",   default: false }
+  - { name: gemini,      pkg: "@google/gemini-cli",        bin: gemini,        login: "gemini",        default: false }
+  - { name: grok,        pkg: "@xai-official/grok",        bin: grok,          login: "grok login",    default: false }
+  # cursor-agent wird per offiziellem Installer (nicht npm) installiert (siehe Rolle).
+
+# Env-Vars, die im agent-Kontext LEER sein müssen, damit die CLIs das Abo statt API nutzen.
+agent_forbidden_api_envs:
+  - ANTHROPIC_API_KEY
+  - OPENAI_API_KEY
+  - GEMINI_API_KEY
+  - GOOGLE_API_KEY
+  - XAI_API_KEY
+  - GROK_CODE_XAI_API_KEY
+  # Perplexity ist die bewusste Ausnahme (API erlaubt) und steht hier NICHT.
+
+# --- Restic --------------------------------------------------------------
+restic_repo: /data/backups/local
+restic_paths:
+  - /data/vaults
+  - /opt/n8n
+  - /opt/surreal
+  - /data/agent/hermes          # Hermes-State (ersetzt /home/agent/.openclaw)
+restic_keep_daily: 7
+restic_keep_weekly: 4
+restic_keep_monthly: 6
+
+# --- DNS / Domain (für Hetzner-Edge + Traefik) ---------------------------
+public_domain: "{{ vault_public_domain | default('example.com') }}"
+public_subdomains:
+  portal: "portal.{{ public_domain }}"
+  api: "api.{{ public_domain }}"
+  n8n_gw: "n8n-gw.{{ public_domain }}"
+  hooks: "hooks.{{ public_domain }}"
+
+# --- R2D2 Migration ------------------------------------------------------
+r2d2_source:
+  openclaw_workspace: "/home/clawd/.openclaw/workspace/"
+  openclaw_companies: "/home/clawd/.openclaw-companies/"
+  vaults: "/home/clawd/vaults/"
+  n8n_dir: "/home/clawd/.n8n/"
+  cli_configs:
+    - ".claude"
+    - ".codex"
+    - ".cursor"
+    - ".gemini"
+    - ".config/gh"
+    - ".config/gcloud"
+    - ".config/gog"
+    - ".gnupg"
+    - ".ssh"
+  projects_to_clone:
+    # Wir klonen Repos frisch von GitHub, nicht rsync
+    - ai-portal
+    - ai-engineering-stack
+    - llm-wiki-system-plan
+    - hive
+    - cv-sabine
+    - cv-visualizer
+    - etrox-de

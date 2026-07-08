@@ -1,0 +1,13 @@
+tls:
+  options:
+    default:
+      minVersion: VersionTLS12
+
+# Middleware-Stack für Tailscale-only Endpunkte
+http:
+  middlewares:
+    tailnet-only:
+      ipAllowList:
+        sourceRange:
+          - "{{ tailnet_subnet }}"
+          - "127.0.0.1/32"

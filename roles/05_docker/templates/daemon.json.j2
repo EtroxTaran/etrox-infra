@@ -1,0 +1,18 @@
+{
+  "data-root": "{{ docker_data_root }}",
+  "default-runtime": "runc",
+  "runtimes": {
+    "nvidia": {
+      "path": "nvidia-container-runtime",
+      "runtimeArgs": []
+    }
+  },
+  "log-driver": "local",
+  "log-opts": {
+    "max-size": "{{ docker_log_max_size }}",
+    "max-file": "{{ docker_log_max_file }}"
+  },
+  "live-restore": true,
+  "userland-proxy": false,
+  "no-new-privileges": false
+}

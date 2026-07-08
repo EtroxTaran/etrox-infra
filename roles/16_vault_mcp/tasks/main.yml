@@ -1,0 +1,46 @@
+---
+# 16_vault_mcp — vaultctl + MCP-Server für kontrollierte Vault-Writes.
+# Baut auf research-core-Vault auf (Repository llm-wiki-system-plan beschreibt
+# das Detail-Design). Hier wird nur der Service installiert + Token erzeugt.
+
+- name: Ensure /home/agent/.local/bin
+  ansible.builtin.file:
+    path: /home/agent/.local/bin
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0755"
+
+- name: Install vaultctl placeholder (binary muss aus llm-wiki-system-plan kommen)
+  ansible.builtin.copy:
+    dest: /home/agent/.local/bin/vaultctl
+    owner: agent
+    group: agent
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      # PLACEHOLDER — echtes vaultctl wird aus dem llm-wiki-system-plan repo
+      # gebaut und hier ausgetauscht.
+      # Erwartetes Interface:
+      #   vaultctl write <vault> <path> [--frontmatter k=v ...] < CONTENT
+      #   vaultctl read  <vault> <path>
+      #   vaultctl status
+      echo "vaultctl placeholder — bitte aus llm-wiki-system-plan installieren" >&2
+      exit 2
+
+- name: Render vault registry (low-tier vaults sind via MCP zugänglich)
+  ansible.builtin.template:
+    src: vault-policy.yml.j2
+    dest: /data/vaults/vault-policy.yml
+    owner: agent
+    group: agent
+    mode: "0644"
+
+- name: Print TODO for vaultctl install
+  ansible.builtin.debug:
+    msg: |
+      ⚠️ vaultctl ist als Placeholder installiert. Sobald das llm-wiki-system-plan
+      Repo verfügbar ist (siehe /data/projects/llm-wiki-system-plan), kann das
+      echte Binary gebaut werden:
+        cd /data/projects/llm-wiki-system-plan && make build && \
+          install -m 755 ./vaultctl /home/agent/.local/bin/

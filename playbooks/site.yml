@@ -1,0 +1,59 @@
+---
+# site.yml — Volles Provisionierung des AI-Servers.
+# Tags erlauben es, einzelne Phasen separat auszuführen.
+
+- name: AI-Server full provisioning
+  hosts: ai_server
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Verify minimum Ubuntu version
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == "Ubuntu"
+          - ansible_distribution_version is version("22.04", ">=")
+        fail_msg: "Dieses Playbook unterstützt nur Ubuntu 22.04+"
+
+    - name: Verify ansible-vault is unlocked
+      ansible.builtin.assert:
+        that:
+          - vault_tailscale_authkey is defined
+        fail_msg: "Ansible-Vault scheint nicht entschlüsselt zu sein. Nutze --ask-vault-pass."
+
+  roles:
+    - { role: 00_base,            tags: [base] }
+    - { role: 01_storage,         tags: [storage] }
+    - { role: 02_users,           tags: [users] }
+    - { role: 03_systemd_slices,  tags: [slices] }
+    - { role: 04_nvidia_cuda,     tags: [nvidia, gpu] }
+    - { role: 05_docker,          tags: [docker] }
+    - { role: 06_tailscale,       tags: [tailscale, network] }
+    - { role: 07_traefik,         tags: [traefik, network] }
+    - { role: 08_ollama,          tags: [ollama, ai] }
+    - { role: 09_surrealdb,       tags: [surrealdb, db] }
+    - { role: 10_postgres_n8n,    tags: [postgres, db] }
+    - { role: 11_n8n_private,     tags: [n8n_private, n8n] }
+    - { role: 12_monitoring,      tags: [monitoring] }
+    - { role: 13_github_runner,   tags: [github_runner, dev] }
+    - { role: 14_davinci_prep,    tags: [davinci, dev] }
+    - { role: 15_restic,          tags: [restic, backup] }
+    - { role: 16_vault_mcp,       tags: [vault_mcp] }
+    - { role: 17_cli_tools,       tags: [cli, dev] }
+    # --- Workstation-Layer (Desktop + Gaming + Kreativ) + Agent-Stack ---
+    - { role: 18_desktop,         tags: [desktop] }
+    - { role: 19_gaming,          tags: [gaming] }
+    - { role: 20_agent_desktop,   tags: [agent_browser, agent] }
+    - { role: 21_gpu_arbiter,     tags: [gpu_arbiter, gpu] }
+    - { role: 22_agent_stack,     tags: [agent_stack, agent] }
+
+  post_tasks:
+    - name: Final summary
+      ansible.builtin.debug:
+        msg:
+          - "✅ Provisionierung abgeschlossen."
+          - "Nächste Schritte:"
+          - "  1. tailscale ip → in inventory/host_vars/ai-server.yml als ai_server_tailnet_ip eintragen"
+          - "  2. ansible-playbook playbooks/migrate-r2d2.yml --ask-vault-pass"
+          - "  3. ansible-playbook playbooks/hetzner-edge.yml --ask-vault-pass"
+          - "  4. ansible-playbook playbooks/verify.yml"

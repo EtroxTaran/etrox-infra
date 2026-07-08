@@ -1,0 +1,21 @@
+---
+# 09_surrealdb — SurrealDB als Container
+
+- name: Ensure surreal data dir
+  ansible.builtin.file:
+    path: "{{ surreal_data_dir }}"
+    state: directory
+    owner: surreal
+    group: surreal
+    mode: "0750"
+
+- name: Render surrealdb compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ surreal_data_dir }}/docker-compose.yml"
+    mode: "0644"
+
+- name: Start surrealdb
+  community.docker.docker_compose_v2:
+    project_src: "{{ surreal_data_dir }}"
+    state: present

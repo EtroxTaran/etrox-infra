@@ -1,0 +1,85 @@
+---
+# AI-Server-spezifische Variablen.
+# Tailscale-IP wird nach erstem Tailscale-Join in inventory/host_vars/ai-server.yml gesetzt.
+
+target_hostname: ai-server
+target_timezone: Europe/Berlin
+target_locale: en_US.UTF-8
+
+# cgroup-v2 Limits pro User-Slice (Masterplan v2 §3)
+# Menschliche Desktop-User (nico, sabine) bleiben UNBEGRENZT — eine interaktive
+# KDE-Session inkl. Gaming/DaVinci darf nicht durch cgroup-Limits gedrosselt werden.
+slice_limits:
+  - user: nico        # uid 1000, admin + human desktop (Erst-User der Installation)
+    cpu_quota: ""     # unbegrenzt
+    mem_max: ""
+  - user: sabine      # uid 1007, human desktop
+    cpu_quota: ""     # unbegrenzt
+    mem_max: ""
+  - user: agent       # uid 1001
+    cpu_quota: "400%"
+    mem_max: "20G"
+    tasks_max: 512
+  - user: n8n         # uid 1002
+    cpu_quota: "200%"
+    mem_max: "6G"
+    tasks_max: 256
+  - user: devrunner   # uid 1003
+    cpu_quota: "800%"
+    mem_max: "24G"
+    tasks_max: 512
+    io_weight: 50
+  - user: ollama      # uid 1004
+    cpu_quota: "200%"
+    mem_high: "14G"
+    mem_max: "16G"
+    io_weight: 100
+  - user: davinci     # uid 1005
+    cpu_quota: "400%"
+    mem_max: "12G"
+  - user: surreal     # uid 1006
+    cpu_quota: "200%"
+    mem_max: "8G"
+
+# n8n hört nur auf Tailscale-Interface
+# Wert wird nach Tailscale-Join in host_vars/ai-server.yml ergänzt:
+#   n8n_listen_address: 100.x.y.a
+n8n_listen_address: "0.0.0.0"
+
+# DaVinci Resolve scratch + media
+davinci_scratch: /data/davinci/scratch
+davinci_media: /data/davinci/media
+
+# GPU — Desktop+Compute-Treiber für RTX 4070 Ti (Desktop-Workstation, NICHT -server!).
+# Der Desktop-Branch liefert den vollen Vulkan/GLX-GUI-Stack für KDE + Steam/Proton.
+# Siehe roles/04_nvidia_cuda + docs/HARDWARE-B850F.md.
+nvidia_driver_branch: "570"        # Desktop-Branch (production), >= CUDA-Mindestversion
+nvidia_driver_flavor: "desktop"    # desktop | server  → Rolle wählt Paketnamen
+nvidia_install_32bit: true         # i386 libnvidia/Vulkan für Proton/Steam
+cuda_version: "12.8"               # passend zum 570er-Treiber
+
+# --- B850-F Hardware (ASUS ROG Strix B850-F Gaming WiFi, AM5) -----------
+# Realtek 2.5GbE (RTL8125): In-Kernel r8169 ist auf 24.04 teils instabil.
+# Bei Problemen r8125-dkms aktivieren (blacklistet r8169 für den Chip).
+b850f_install_r8125_dkms: false    # auf true setzen, falls 2.5GbE flappt/kein DHCP
+b850f_install_lm_sensors: true
+b850f_install_linux_firmware_latest: true   # WiFi7/BT aktuell halten
+
+# --- Desktop (KDE Plasma) ----------------------------------------------
+desktop_environment: kde           # kde (Wayland default + X11-Fallback)
+display_manager: sddm
+
+# --- GPU-Arbiter -------------------------------------------------------
+# 12 GB VRAM werden von Ollama, DaVinci und Civ 7 geteilt → Ollama weicht
+# bei schwerer GPU-Last. Siehe roles/21_gpu_arbiter.
+ollama_keep_alive: "2m"            # kurz, damit idle Modelle VRAM schnell freigeben
+gpu_heavy_stops_ollama: true
+
+# --- Gaming ------------------------------------------------------------
+steam_library_dir: /data/games
+proton_ge_install: true
+
+# --- GitHub Self-Hosted Runner (lokal, gehärtet) -----------------------
+# ephemeral=true → Respawn-Loop (jeder Job frischer Kontext). Siehe docs/CI-LOCAL.md.
+github_runner_ephemeral: true
+github_runner_group: ai-server-trusted

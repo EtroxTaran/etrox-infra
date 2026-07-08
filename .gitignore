@@ -1,0 +1,44 @@
+# Ansible
+.ansible-fact-cache/
+*.retry
+.vault-password
+.vault-pass*
+
+# Generated discovery / inventory snapshots
+inventory/r2d2-snapshot.json
+inventory/host_vars/*-discovered.yml
+
+# Local overrides
+inventory/hosts.local.yml
+inventory/group_vars/all/local.yml
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node (für Workflow-Tooling falls genutzt)
+node_modules/
+
+# Secrets that should NEVER be committed even encrypted
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+*.token
+
+# Restic / rclone configs (handled via Ansible Vault)
+restic.cfg
+rclone.conf

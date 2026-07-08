@@ -1,0 +1,251 @@
+---
+# 90_migration_r2d2 — Cold-Move von R2D2.
+# Pre-flights stehen im Playbook playbooks/migrate-r2d2.yml.
+# Dieser Tasks-File läuft auf dem AI-Server und zieht via rsync von R2D2.
+
+- name: Variables
+  ansible.builtin.set_fact:
+    r2d2_ssh: "{{ hostvars['r2d2'].ansible_user }}@{{ hostvars['r2d2'].ansible_host }}"
+    r2d2_src: "{{ r2d2_source }}"
+    migration_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+
+# --- 0) Pre-Migration Snapshot (Lebensretter falls Migration scheitert) ---
+
+- name: Ensure r2d2-archive dir on AI-Server
+  ansible.builtin.file:
+    path: /data/backups/r2d2-archive
+    state: directory
+    owner: root
+    mode: "0750"
+
+- name: Pull full /home/clawd snapshot from R2D2 (excluding huge caches)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    OUT=/data/backups/r2d2-archive/r2d2-clawd-{{ migration_timestamp }}.tar.gz
+    if [[ -f "$OUT" ]]; then
+      echo "snapshot existiert bereits: $OUT"
+      exit 0
+    fi
+    ssh {{ r2d2_ssh }} "tar --exclude='node_modules' \
+                            --exclude='.cache' \
+                            --exclude='.npm' \
+                            --exclude='*.cpuprofile' \
+                            --exclude='openclaw-*-archive-*' \
+                            -czf - \
+                            /home/clawd/.openclaw \
+                            /home/clawd/.openclaw-companies \
+                            /home/clawd/vaults \
+                            /home/clawd/.n8n \
+                            2>/dev/null" > "$OUT"
+    ls -lh "$OUT"
+  args:
+    creates: "/data/backups/r2d2-archive/r2d2-clawd-{{ migration_timestamp }}.tar.gz"
+  register: snapshot_result
+
+- name: Show snapshot path (for rollback reference)
+  ansible.builtin.debug:
+    msg: "📸 Pre-migration snapshot: /data/backups/r2d2-archive/r2d2-clawd-{{ migration_timestamp }}.tar.gz"
+
+# --- 1) OpenClaw Workspace ----------------------------------------------
+
+- name: Migrate OpenClaw workspace (clawd → agent)
+  ansible.posix.synchronize:
+    src: "{{ r2d2_src.openclaw_workspace }}"
+    dest: "/home/agent/.openclaw/workspace/"
+    archive: true
+    delete: false
+    rsync_opts:
+      - "--exclude=*.cpuprofile"
+      - "--exclude=*.log"
+  delegate_to: localhost
+  become: false
+  vars:
+    ansible_ssh_host: "{{ hostvars['r2d2'].ansible_host }}"
+    ansible_ssh_user: "{{ hostvars['r2d2'].ansible_user }}"
+  # Hinweis: synchronize via 'pull' ist limitiert; alternativ rsync via shell:
+- name: Migrate OpenClaw via direct rsync (more control)
+  ansible.builtin.shell: |
+    rsync -aHAX --info=progress2 \
+      --exclude='*.cpuprofile' --exclude='*.log' \
+      "{{ r2d2_ssh }}:{{ r2d2_src.openclaw_workspace }}" \
+      /home/agent/.openclaw/workspace/
+  args:
+    creates: /home/agent/.openclaw/workspace/AGENTS.md
+  become_user: agent
+
+- name: Rewrite paths in workspace files (clawd → agent)
+  ansible.builtin.shell: |
+    grep -rl '/home/clawd' /home/agent/.openclaw/workspace/ 2>/dev/null \
+      | xargs --no-run-if-empty sed -i 's|/home/clawd|/home/agent|g'
+  become_user: agent
+  changed_when: true
+
+- name: Migrate OpenClaw companies dir
+  ansible.builtin.shell: |
+    rsync -aHAX "{{ r2d2_ssh }}:{{ r2d2_src.openclaw_companies }}" \
+      /home/agent/.openclaw-companies/
+  args:
+    creates: /home/agent/.openclaw-companies
+  become_user: agent
+
+# --- 2) Vaults -----------------------------------------------------------
+
+- name: Ensure vault root has agent ownership
+  ansible.builtin.file:
+    path: "{{ vault_root }}"
+    state: directory
+    owner: agent
+    group: agent
+    mode: "0755"
+
+- name: Migrate each vault (rsync inkl. .git)
+  ansible.builtin.shell: |
+    rsync -aHAX --info=progress2 \
+      "{{ r2d2_ssh }}:{{ r2d2_src.vaults }}{{ item.name }}/" \
+      "{{ vault_root }}/{{ item.name }}/"
+  args:
+    creates: "{{ vault_root }}/{{ item.name }}/.git"
+  loop: "{{ vault_definitions }}"
+  loop_control:
+    label: "{{ item.name }}"
+  become_user: agent
+
+- name: Copy vault registry
+  ansible.builtin.shell: |
+    rsync -a "{{ r2d2_ssh }}:{{ r2d2_src.vaults }}vault-registry.json" \
+              "{{ vault_root }}/" || true
+    rsync -a "{{ r2d2_ssh }}:{{ r2d2_src.vaults }}VAULT_REGISTRY.md" \
+              "{{ vault_root }}/" || true
+  become_user: agent
+  changed_when: false
+
+# Ownership pro Vault gemäß vault_definitions.owner: high-tier Sabine-Vaults
+# gehören 'sabine' (Mensch), Nico-Ops dem 'nico', der Rest dem 'agent'.
+- name: Set per-vault ownership (Trust-Boundary)
+  ansible.builtin.file:
+    path: "{{ vault_root }}/{{ item.name }}"
+    state: directory
+    owner: "{{ item.owner | default(vault_owner_default) }}"
+    group: "{{ item.owner | default(vault_owner_default) }}"
+    recurse: true
+  loop: "{{ vault_definitions }}"
+  loop_control:
+    label: "{{ item.name }} → {{ item.owner | default(vault_owner_default) }}"
+
+# --- 3) n8n Workflows + Credentials --------------------------------------
+# Strategie: n8n auf R2D2 ist gestoppt. Wir starten temporär eine n8n-CLI-
+# Instanz ON R2D2 (Read-only auf SQLite), exportieren JSON, kopieren rüber,
+# importieren in n8n-private (Postgres). encryptionKey muss matchen.
+
+- name: Detect n8n version on R2D2 from package.json (Schema-Match-Schutz)
+  ansible.builtin.shell: |
+    ssh {{ r2d2_ssh }} '
+      if [[ -f /home/clawd/.n8n/package.json ]]; then
+        jq -r .dependencies.n8n /home/clawd/.n8n/package.json 2>/dev/null
+      elif command -v n8n >/dev/null 2>&1; then
+        n8n --version 2>/dev/null
+      else
+        echo latest
+      fi
+    ' | tr -d '^~v\n '
+  register: r2d2_n8n_version
+  changed_when: false
+
+- name: Show detected n8n version on R2D2
+  ansible.builtin.debug:
+    msg: "n8n version on R2D2 = '{{ r2d2_n8n_version.stdout }}' — Export läuft mit derselben Version"
+
+- name: Trigger n8n export on R2D2 (matched version, read-only)
+  ansible.builtin.command: >-
+    ssh {{ r2d2_ssh }} 'cd /home/clawd/.n8n &&
+      npx -y n8n@{{ r2d2_n8n_version.stdout | default("latest", true) }} export:workflow --all --output=/tmp/n8n-workflows-export.json &&
+      npx -y n8n@{{ r2d2_n8n_version.stdout | default("latest", true) }} export:credentials --all --output=/tmp/n8n-creds-export.json'
+  delegate_to: localhost
+  become: false
+  changed_when: true
+  register: n8n_export
+  failed_when: n8n_export.rc != 0
+
+- name: Fetch exports from R2D2
+  ansible.builtin.shell: |
+    rsync "{{ r2d2_ssh }}:/tmp/n8n-workflows-export.json" \
+          /opt/n8n/workflows-import/r2d2-workflows.json
+    rsync "{{ r2d2_ssh }}:/tmp/n8n-creds-export.json" \
+          /opt/n8n/workflows-import/r2d2-creds.json
+  become_user: root
+
+- name: Import workflows into n8n-private
+  ansible.builtin.command: >-
+    docker exec n8n-private n8n import:workflow
+      --input=/workflows-import/r2d2-workflows.json
+      --separate
+  register: import_wf
+  changed_when: "'imported' in import_wf.stdout"
+
+- name: Import credentials into n8n-private (encryptionKey muss matchen!)
+  ansible.builtin.command: >-
+    docker exec n8n-private n8n import:credentials
+      --input=/workflows-import/r2d2-creds.json
+  register: import_creds
+  changed_when: "'imported' in import_creds.stdout"
+  failed_when:
+    - import_creds.rc != 0
+    - "'encryption' in import_creds.stderr"
+
+# --- 4) CLI configs (sicherheitssensitiv, opt-in mit Var) ----------------
+
+- name: Migrate CLI configs (only if migrate_cli_configs=true)
+  ansible.builtin.shell: |
+    rsync -aHAX "{{ r2d2_ssh }}:/home/clawd/{{ item }}" \
+      "/home/agent/{{ item | dirname if '/' in item else '' }}"
+  loop: "{{ r2d2_source.cli_configs }}"
+  loop_control:
+    label: "{{ item }}"
+  when: migrate_cli_configs | default(false) | bool
+  become_user: agent
+  changed_when: true
+
+# --- 5) Projects: Klonen statt rsync ------------------------------------
+
+- name: Ensure /data/projects ownership
+  ansible.builtin.file:
+    path: /data/projects
+    state: directory
+    owner: devrunner
+    group: devrunner
+    mode: "0755"
+
+- name: Clone projects from GitHub
+  ansible.builtin.git:
+    repo: "https://github.com/{{ vault_github.org }}/{{ item }}.git"
+    dest: "/data/projects/{{ item }}"
+    update: false
+  loop: "{{ r2d2_source.projects_to_clone }}"
+  become_user: devrunner
+  failed_when: false   # einzelne Repos können fehlen oder anders heißen
+
+# --- 6) Archive (read-only Reference) -----------------------------------
+
+- name: Pull old OpenClaw archives as reference (kein Re-Use, nur Aufbewahrung)
+  ansible.builtin.shell: |
+    set -e
+    DEST=/data/backups/r2d2-archive
+    mkdir -p "$DEST"
+    rsync -aHAX \
+      "{{ r2d2_ssh }}:/home/clawd/openclaw-backups-archive-*" \
+      "{{ r2d2_ssh }}:/home/clawd/openclaw-state-archive-*" \
+      "$DEST/" || true
+  become_user: root
+  changed_when: false
+
+# --- 7) Done -------------------------------------------------------------
+
+- name: Migration summary
+  ansible.builtin.debug:
+    msg:
+      - "✅ Migration abgeschlossen."
+      - "Nächste Schritte:"
+      - "  - Manuell verifizieren: ls /home/agent/.openclaw/workspace/AGENTS.md"
+      - "  - n8n öffnen (Tailscale): http://{{ ansible_default_ipv4.address }}:5678"
+      - "  - Credentials testen: in n8n UI auf 'Test' klicken bei je 1 Credential"
+      - "  - Nach OK: R2D2 endgültig depriorisieren — aber NICHT abschalten (Smart-Home läuft dort)"

@@ -1,0 +1,109 @@
+---
+# 01_storage — fstab + Mounts.
+# WICHTIG: Diese Rolle erwartet, dass die NVMe-SSDs schon partitioniert + formatiert sind.
+# Partitionierung selbst macht die Rolle NICHT (zu destruktiv für idempotenten Lauf).
+# Siehe docs/MIGRATION-RUNBOOK.md §1 und docs/DISK-LAYOUT.md für die Partition-Schritte.
+#
+# Die Rolle ist topologie-unabhängig: sie funktioniert für single_disk_4tb
+# (OS+data auf derselben Disk in zwei Partitionen) und für split_os_data
+# (OS auf dedizierter SSD, data auf 4 TB), weil sie nur Labels prüft.
+
+- name: Discover block devices
+  ansible.builtin.command: lsblk -J -o NAME,SIZE,TYPE,MOUNTPOINT,FSTYPE,LABEL,UUID
+  register: lsblk_out
+  changed_when: false
+
+- name: Show detected block layout (informational)
+  ansible.builtin.debug:
+    var: lsblk_out.stdout
+  when: ansible_check_mode
+
+- name: Verify required partition labels exist
+  ansible.builtin.command: "blkid -L {{ item }}"
+  register: label_checks
+  changed_when: false
+  failed_when: label_checks.rc != 0
+  loop: "{{ storage_required_labels }}"
+  loop_control:
+    label: "LABEL={{ item }}"
+  # Schlägt fehl, wenn z. B. 'os' oder 'data' nicht als ext4-Label existieren.
+  # Fix: e2label /dev/<part> os  bzw.  e2label /dev/<part> data
+  # Siehe docs/DISK-LAYOUT.md.
+
+- name: Verify /etc/fstab uses LABEL= for required filesystems
+  ansible.builtin.shell: |
+    grep -qE '^[[:space:]]*LABEL={{ item }}[[:space:]]' /etc/fstab
+  register: fstab_label_checks
+  changed_when: false
+  failed_when: fstab_label_checks.rc != 0
+  loop: "{{ storage_required_labels }}"
+  loop_control:
+    label: "fstab LABEL={{ item }}"
+  # Stabilität: ohne LABEL=… in fstab bricht der OS-Umzug auf eine neue SSD,
+  # weil sich Device-Path und UUID ändern. Siehe docs/OS-SSD-MIGRATION.md.
+
+- name: Verify expected mountpoints' parent dirs exist
+  ansible.builtin.file:
+    path: "{{ item.mountpoint }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ storage_mounts }}"
+
+- name: Verify each target mountpoint is on a partition with the expected label
+  ansible.builtin.shell: |
+    set -eo pipefail
+    src=$(findmnt -n -o SOURCE --target "{{ item.mountpoint }}")
+    label=$(blkid -s LABEL -o value "$src")
+    test "$label" = "{{ item.expected_partition_label }}"
+  register: mnt_checks
+  changed_when: false
+  failed_when: mnt_checks.rc != 0
+  loop: "{{ storage_mounts }}"
+  loop_control:
+    label: "{{ item.mountpoint }} (LABEL={{ item.expected_partition_label }})"
+  # Wenn diese Task fehlt: Mountpoint liegt nicht auf der erwarteten Partition.
+  # Beispiel: /data ist root-fs (Single-Disk ohne separate data-Partition) →
+  # User muss docs/MIGRATION-RUNBOOK.md §1 nachholen.
+
+- name: Create standard subdirs under /data
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /data/projects
+    - /data/builds
+    - /data/vaults
+    - /data/models
+    - /data/davinci/scratch
+    - /data/davinci/media
+    - /data/games
+    - /data/agent
+    - /data/agent/hermes
+    - /data/backups
+    - /data/backups/local
+    - /data/backups/r2d2-archive
+
+- name: Set ownership on /data subdirs (per role)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group | default(item.owner) }}"
+    state: directory
+  loop:
+    - { path: /data/projects, owner: devrunner }
+    - { path: /data/builds,   owner: devrunner }
+    - { path: /data/models,   owner: ollama }
+    - { path: /data/davinci,  owner: davinci }
+    - { path: /data/vaults,   owner: agent }
+    - { path: /data/games,    owner: root, group: games }
+    - { path: /data/agent,    owner: agent }
+    - { path: /data/backups,  owner: root }
+
+- name: Make Steam library dir group-writable for human gamers
+  ansible.builtin.file:
+    path: /data/games
+    state: directory
+    mode: "2775"      # setgid: neue Dateien erben group=games (nico, sabine)
+    owner: root
+    group: games

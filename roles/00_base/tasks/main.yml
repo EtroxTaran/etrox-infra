@@ -1,0 +1,134 @@
+---
+# 00_base — Grundkonfiguration: locale, timezone, swap, basic packages, ufw
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ target_hostname }}"
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ target_timezone }}"
+
+- name: Ensure locale is generated
+  community.general.locale_gen:
+    name: "{{ target_locale }}"
+    state: present
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - apt-transport-https
+      - ca-certificates
+      - curl
+      - wget
+      - gnupg
+      - lsb-release
+      - software-properties-common
+      - build-essential
+      - git
+      - jq
+      - rsync
+      - tmux
+      - htop
+      - btop
+      - iotop
+      - ncdu
+      - tree
+      - unzip
+      - zip
+      - vim
+      - nano
+      - openssh-server
+      - ufw
+      - fail2ban
+      - chrony
+      - python3
+      - python3-pip
+      - python3-venv
+      - pipx
+      - acl                # für become_user file ops
+      - rclone
+      - restic
+      - mokutil            # Secure-Boot-State für NVIDIA-DKMS (roles/04_nvidia_cuda)
+    state: present
+
+# --- B850-F Hardware (ASUS ROG Strix B850-F Gaming WiFi) ----------------
+- name: Install lm-sensors + firmware
+  ansible.builtin.apt:
+    name:
+      - lm-sensors
+      - linux-firmware       # WiFi 7 / Bluetooth aktuell halten
+    state: present
+  when: b850f_install_lm_sensors | default(true) | bool
+
+# Realtek RTL8125 2.5GbE: In-Kernel r8169 ist auf 24.04 teils instabil
+# (Link, aber kein DHCP/Traffic). Fallback: r8125-dkms + r8169 blacklisten.
+# Standardmäßig AUS — nur aktivieren, wenn 2.5GbE zickt (b850f_install_r8125_dkms=true).
+- name: Install r8125-dkms (Realtek 2.5GbE fix, optional)
+  ansible.builtin.apt:
+    name: r8125-dkms
+    state: present
+    update_cache: true
+  when: b850f_install_r8125_dkms | default(false) | bool
+  failed_when: false
+
+- name: Blacklist in-kernel r8169 when using r8125-dkms
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/blacklist-r8169.conf
+    mode: "0644"
+    content: |
+      # ASUS B850-F RTL8125 2.5GbE — r8125-dkms statt In-Kernel r8169 nutzen.
+      blacklist r8169
+  when: b850f_install_r8125_dkms | default(false) | bool
+  notify: reboot required
+
+- name: Configure UFW defaults
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+
+- name: UFW allow SSH on LAN + tailscale
+  community.general.ufw:
+    rule: allow
+    port: "22"
+    proto: tcp
+
+- name: UFW allow tailscale interface
+  community.general.ufw:
+    rule: allow
+    interface: tailscale0
+    direction: in
+
+- name: UFW enable
+  community.general.ufw:
+    state: enabled
+
+- name: Ensure swap is present (8 GB if missing)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if ! swapon --show | grep -q '/swapfile'; then
+      fallocate -l 8G /swapfile
+      chmod 600 /swapfile
+      mkswap /swapfile
+      swapon /swapfile
+      grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      echo CHANGED
+    fi
+  register: swap_result
+  changed_when: "'CHANGED' in swap_result.stdout"
+
+- name: Lower swappiness (favor RAM)
+  ansible.posix.sysctl:
+    name: vm.swappiness
+    value: "10"
+    sysctl_set: true
+    state: present
+    reload: true

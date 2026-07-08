@@ -1,0 +1,44 @@
+{
+  "name": "System Health Daily (07:00)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 7 * * *" }] }
+      },
+      "id": "cron-1",
+      "name": "Daily 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "command": "nvidia-smi --query-gpu=temperature.gpu,memory.used,utilization.gpu --format=csv,noheader; df -h /data /opt | tail -n +2; docker ps --format '{{.Names}}: {{.Status}}'"
+      },
+      "id": "exec-1",
+      "name": "Collect Metrics",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $env.NICO_CHAT_ID }}",
+        "text": "=🌅 Tagesreport\\n\\n```\\n{{ $json.stdout }}\\n```",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "tg-1",
+      "name": "Send to Nico",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [680, 300],
+      "credentials": { "telegramApi": { "id": "system-bot", "name": "SystemBot" } }
+    }
+  ],
+  "connections": {
+    "Daily 07:00":      { "main": [[{ "node": "Collect Metrics", "type": "main", "index": 0 }]] },
+    "Collect Metrics":  { "main": [[{ "node": "Send to Nico",     "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

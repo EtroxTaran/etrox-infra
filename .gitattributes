@@ -1,0 +1,17 @@
+# Force LF line endings for all text files — Linux is the target.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.json  text eol=lf
+*.j2    text eol=lf
+*.md    text eol=lf
+*.cfg   text eol=lf
+*.conf  text eol=lf
+*.env   text eol=lf
+
+# Binary
+*.png   binary
+*.jpg   binary
+*.gz    binary

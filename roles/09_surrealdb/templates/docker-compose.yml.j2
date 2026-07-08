@@ -1,0 +1,35 @@
+---
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:latest
+    container_name: surrealdb
+    restart: unless-stopped
+    user: "1006:1006"
+    networks: [agent-net, surreal-net]
+    ports:
+      # Tailscale-only via host firewall + listen address
+      - "127.0.0.1:{{ surreal_port }}:8000"
+    command:
+      - start
+      - --auth
+      - --user
+      - root
+      - --pass
+      - "{{ vault_surrealdb_root_password | default('CHANGE_ME_IN_VAULT') }}"
+      - "file:/data/surreal.db"
+    volumes:
+      - "{{ surreal_data_dir }}:/data"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: "2.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  agent-net:    { external: true }
+  surreal-net:  { external: true }

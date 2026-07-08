@@ -1,0 +1,20 @@
+---
+# Hetzner public-edge VPS (Dokploy host)
+target_hostname: etrox
+hetzner_admin_user: "{{ vault_hetzner_admin_user | default('root') }}"
+
+# n8n-edge: nur Webhook-Gateway, kein Editor, kein Vault-Zugriff
+n8n_edge:
+  image: n8nio/n8n:latest
+  disable_ui: true
+  webhook_url: "https://{{ public_subdomains.n8n_gw }}"
+  forward_to: "http://{{ ai_server_tailnet_ip | default('100.0.0.0') }}:5678"
+  encryption_key_var: vault_n8n_edge_encryption_key
+  webhook_shared_secret_var: vault_n8n_webhook_shared_secret
+
+# UFW-Hardening: Dokploy-Admin (Port 3000) nur via Tailscale
+ufw_rules:
+  - { rule: allow, interface: tailscale0 }
+  - { rule: allow, port: 80, proto: tcp }
+  - { rule: allow, port: 443, proto: tcp }
+  - { rule: deny, port: 3000, proto: tcp }

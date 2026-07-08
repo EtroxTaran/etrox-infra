@@ -1,0 +1,60 @@
+---
+# migrate-r2d2.yml — Cold-Move von R2D2 auf den neuen AI-Server.
+#
+# Voraussetzungen:
+#   - site.yml lief erfolgreich durch
+#   - R2D2 ist erreichbar (LAN oder Tailscale)
+#   - OpenClaw + n8n auf R2D2 sind GESTOPPT (sonst Inkonsistenzen)
+#   - vault_n8n_encryption_key in vault.yml = Wert aus /home/clawd/.n8n/config auf R2D2
+
+- name: Pre-flight — verify R2D2 reachability and idle state
+  hosts: r2d2
+  gather_facts: false
+  tasks:
+    - name: SSH ping
+      ansible.builtin.ping:
+
+    - name: Verify n8n is not running on R2D2
+      ansible.builtin.shell: |
+        set -o pipefail
+        if pgrep -af 'n8n start' >/dev/null; then
+          echo "RUNNING"
+        else
+          echo "STOPPED"
+        fi
+      register: n8n_state
+      changed_when: false
+      failed_when: "'RUNNING' in n8n_state.stdout"
+
+    - name: Verify OpenClaw / PM2 processes are stopped
+      ansible.builtin.shell: |
+        set -o pipefail
+        if pm2 list 2>/dev/null | grep -E 'online|launching' | grep -v 'pm2 list'; then
+          echo "RUNNING"
+        else
+          echo "OK"
+        fi
+      register: pm2_state
+      changed_when: false
+      failed_when: "'RUNNING' in pm2_state.stdout"
+
+    - name: Read n8n encryption key from R2D2 (must match Ansible-Vault)
+      ansible.builtin.slurp:
+        src: /home/clawd/.n8n/config
+      register: n8n_config_raw
+
+    - name: Compare n8n encryption keys
+      ansible.builtin.assert:
+        that:
+          - (n8n_config_raw.content | b64decode | from_json).encryptionKey == vault_n8n_encryption_key
+        fail_msg: |
+          Der vault_n8n_encryption_key in der Ansible-Vault stimmt NICHT mit dem
+          encryptionKey auf R2D2 überein. Migration würde alle Credentials zerstören.
+          Aktualisiere vault.yml mit dem korrekten Wert (aus /home/clawd/.n8n/config).
+
+- name: Run migration tasks on AI-Server
+  hosts: ai_server
+  become: true
+  gather_facts: true
+  roles:
+    - { role: 90_migration_r2d2, tags: [migration] }

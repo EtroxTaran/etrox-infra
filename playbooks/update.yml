@@ -1,0 +1,40 @@
+---
+# update.yml — Idempotente Aktualisierung der laufenden AI-Server-Installation.
+# Re-runs sind explizit safe.
+
+- name: Update AI-Server services
+  hosts: ai_server
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Update apt cache and upgrade packages
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: safe
+        cache_valid_time: 3600
+      tags: [apt]
+
+    - name: Pull latest Docker images
+      community.docker.docker_compose_v2:
+        project_src: /opt/n8n
+        pull: always
+        state: present
+      tags: [docker]
+
+    - name: Pull latest Ollama models
+      ansible.builtin.command: "ollama pull {{ item }}"
+      loop: "{{ ollama_default_models }}"
+      changed_when: false
+      become_user: ollama
+      tags: [ollama]
+
+    - name: Update GitHub Actions Runner if available
+      ansible.builtin.command:
+        cmd: ./config.sh --check
+        chdir: /home/devrunner/actions-runner
+      become_user: devrunner
+      register: runner_check
+      changed_when: false
+      failed_when: false
+      tags: [runner]

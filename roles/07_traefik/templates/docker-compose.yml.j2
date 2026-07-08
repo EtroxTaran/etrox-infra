@@ -1,0 +1,29 @@
+---
+services:
+  traefik:
+    image: traefik:v3
+    container_name: traefik
+    restart: unless-stopped
+    networks: [agent-net, dev-net, monitoring-net]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # DNS-01 Challenge Credentials
+      CLOUDFLARE_DNS_API_TOKEN: "{{ vault_dns_api_token | default('') }}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /opt/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - /opt/traefik/config:/etc/traefik/config:ro
+      - /opt/traefik/letsencrypt:/letsencrypt
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.{{ ai_server_hostname }}.{{ tailnet_name }}`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=tailnet-only@file"
+      - "traefik.http.routers.dashboard.tls=true"
+
+networks:
+  agent-net:      { external: true }
+  dev-net:        { external: true }
+  monitoring-net: { external: true }

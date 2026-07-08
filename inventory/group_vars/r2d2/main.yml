@@ -1,0 +1,8 @@
+---
+# R2D2 ist im Inventory READ-ONLY.
+# Migration darf hier nichts ändern.
+r2d2_mode: read-only
+target_hostname: r2d2
+
+# Keine Pakete installieren, keine Configs schreiben.
+# Nur 'fetch', 'synchronize' (pull), 'command' (read-only) sind erlaubt.

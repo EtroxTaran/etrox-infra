@@ -1,0 +1,55 @@
+---
+# hetzner-edge.yml — n8n-edge auf Hetzner/Dokploy einrichten.
+#
+# WICHTIG: Dokploy ist auf Hetzner schon installiert. Dieses Playbook
+# fügt nur n8n-edge als zusätzlichen Service hinzu und härtet UFW.
+
+- name: Configure Hetzner public-edge
+  hosts: hetzner
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Ensure UFW is configured (Tailscale-only admin, public 80/443)
+      community.general.ufw:
+        rule: "{{ item.rule }}"
+        port: "{{ item.port | default(omit) }}"
+        proto: "{{ item.proto | default(omit) }}"
+        interface: "{{ item.interface | default(omit) }}"
+      loop: "{{ ufw_rules }}"
+      tags: [ufw]
+
+    - name: Ensure UFW is enabled
+      community.general.ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+      tags: [ufw]
+
+    - name: Render n8n-edge docker-compose
+      ansible.builtin.template:
+        src: ../roles/11_n8n_private/templates/docker-compose.edge.yml.j2
+        dest: /opt/n8n-edge/docker-compose.yml
+        mode: "0644"
+      tags: [n8n_edge]
+
+    - name: Render n8n-edge .env
+      ansible.builtin.template:
+        src: ../roles/11_n8n_private/templates/n8n-edge.env.j2
+        dest: /opt/n8n-edge/.env
+        mode: "0600"
+      tags: [n8n_edge]
+      no_log: true
+
+    - name: Start n8n-edge
+      community.docker.docker_compose_v2:
+        project_src: /opt/n8n-edge
+        state: present
+      tags: [n8n_edge]
+
+    - name: Print Tailscale ACL hint
+      ansible.builtin.debug:
+        msg: |
+          ⚠️ Tailscale-ACL muss manuell im Admin-Console gepflegt werden.
+          Vorlage: roles/06_tailscale/files/tailscale-acl.json
+          Wichtig: src=tag:public-edge → dst=tag:ai-server:5678 erlauben.

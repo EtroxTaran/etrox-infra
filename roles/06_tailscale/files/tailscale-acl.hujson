@@ -1,0 +1,37 @@
+// Tailscale ACL Policy Vorlage — manuell ins Admin-Console kopieren.
+// Quelle: docs/ARCHITECTURE.md §6 + AI-Server-Addendum
+{
+  "tagOwners": {
+    "tag:ai-server":   ["autogroup:owner"],
+    "tag:public-edge": ["autogroup:owner"],
+    "tag:home-control":["autogroup:owner"]
+  },
+
+  "acls": [
+    // Owner darf alles
+    { "action": "accept", "src": ["autogroup:owner"], "dst": ["*:*"] },
+
+    // Hetzner public-edge darf zur n8n-private auf AI-Server
+    { "action": "accept",
+      "src":    ["tag:public-edge"],
+      "dst":    ["tag:ai-server:5678"]   // nur n8n-Port
+    },
+
+    // AI-Server darf zu Hetzner (für Deploys, API-Calls)
+    { "action": "accept",
+      "src":    ["tag:ai-server"],
+      "dst":    ["tag:public-edge:*"]
+    },
+
+    // R2D2 (home-control) bleibt isoliert: nur Owner
+    // (HomeAssistant wird nicht ins Tailnet exposed)
+  ],
+
+  "ssh": [
+    { "action": "accept",
+      "src": ["autogroup:owner"],
+      "dst": ["tag:ai-server", "tag:public-edge", "tag:home-control"],
+      "users": ["root", "nico", "etrox", "agent", "clawd"]
+    }
+  ]
+}

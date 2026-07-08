@@ -1,0 +1,13 @@
+---
+- name: update initramfs
+  ansible.builtin.command: update-initramfs -u
+  changed_when: true
+
+- name: reboot required
+  ansible.builtin.debug:
+    msg: "Ein Reboot ist erforderlich nach NVIDIA-Treiber-Install. Bitte nach diesem Playbook 'sudo reboot' ausführen, dann verify.yml."
+
+- name: restart docker
+  ansible.builtin.systemd:
+    name: docker
+    state: restarted

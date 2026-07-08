@@ -1,0 +1,88 @@
+---
+# vault.yml.example — VORLAGE für die ansible-vault-encrypted Datei.
+#
+# Wird per scripts/secrets-init.sh interaktiv ausgefüllt. Nach der Eingabe:
+#   ansible-vault encrypt inventory/group_vars/all/vault.yml
+#
+# DIE ECHTE vault.yml DARF NIEMALS UNVERSCHLÜSSELT GECOMMITTET WERDEN.
+# (.gitignore sollte das verhindern, aber Vorsicht beim git add -A.)
+
+# --- Tailscale -----------------------------------------------------------
+vault_tailscale_authkey: "tskey-auth-XXXXXX-XXXXXXXXXXXXXXXXX"
+
+# --- Hetzner Admin -------------------------------------------------------
+vault_hetzner_admin_user: "root"
+vault_hetzner_admin_ssh_key: "~/.ssh/id_ed25519"
+
+# --- Domain & DNS --------------------------------------------------------
+vault_public_domain: "deine-domain.de"
+vault_dns_provider: "cloudflare"   # oder hetzner, route53
+vault_dns_api_token: "cf-XXXXXXXX"
+
+# --- Telegram Bots -------------------------------------------------------
+vault_telegram:
+  nathan_bot_token: "1234567890:AABBCC..."
+  lisa_bot_token: "1234567891:DDEEFF..."
+  system_bot_token: "1234567892:GGHHII..."
+  nico_chat_id: "111111111"
+  sabine_chat_id: "222222222"
+
+# --- Discord -------------------------------------------------------------
+vault_discord:
+  ci_webhook_url: "https://discord.com/api/webhooks/.../..."
+  health_webhook_url: "https://discord.com/api/webhooks/.../..."
+  errors_webhook_url: "https://discord.com/api/webhooks/.../..."
+
+# --- GitHub --------------------------------------------------------------
+vault_github:
+  org: "your-org"
+  pat_token: "ghp_XXXXXXXXXXXX"        # repo + workflow + admin:org_hook scopes
+  runner_registration_token: ""        # wird via gh-cli zur Laufzeit geholt
+
+# --- n8n -----------------------------------------------------------------
+# WICHTIG: Den Wert aus /home/clawd/.n8n/config (Feld "encryptionKey") von R2D2 kopieren,
+# sonst sind alle n8n-Credentials nach Migration kaputt.
+vault_n8n_encryption_key: "GENERATE_64_HEX_CHARS_openssl_rand_-hex_32"
+vault_n8n_webhook_shared_secret: "generate-strong-32char-random"
+
+# --- n8n Edge (Hetzner) --------------------------------------------------
+vault_n8n_edge_encryption_key: "different-from-private-32char"
+
+# --- Postgres (für n8n + Auth) ------------------------------------------
+vault_postgres:
+  n8n_db: "n8n"
+  n8n_user: "n8n"
+  n8n_password: "STRONG_PASSWORD_HERE"
+
+# --- SurrealDB ----------------------------------------------------------
+vault_surrealdb_root_password: "GENERATE_STRONG_32CHAR_PASSWORD"
+
+# --- restic + rclone ----------------------------------------------------
+vault_restic_password: "VERY_STRONG_BACKUP_PASSWORD"
+vault_rclone_remote: "gdrive"
+vault_rclone_config: |
+  [gdrive]
+  type = drive
+  client_id = ...
+  client_secret = ...
+  scope = drive
+  token = {"access_token":"...","token_type":"Bearer","refresh_token":"...","expiry":"..."}
+
+# --- GPG (für ggf. Migration) -------------------------------------------
+vault_gpg_passphrase: "..."
+
+# --- Perplexity (EINZIGE erlaubte API-Abrechnung) -----------------------
+# Perplexity ist die bewusste Ausnahme von der "Subscription-only"-Regel:
+# Suche/Recherche läuft über die Perplexity-API. Key: https://www.perplexity.ai/settings/api
+vault_perplexity_api_key: "pplx-..."
+
+# --- Modell-API-Keys: NUR falls einzelne n8n-Workflows/Tools sie brauchen --
+# ⚠️ NICHT für die Coding-CLIs! Claude Code / Codex / Cursor / Gemini / Grok laufen
+# per Abo-OAuth (siehe docs/AGENT-STACK.md). Diese Keys dürfen NIEMALS in den
+# Shell-Env des `agent`-Users gelangen (sonst API-Billing statt Abo). Default: leer.
+vault_anthropic_api_key: ""
+vault_openai_api_key: ""
+vault_google_ai_api_key: ""
+
+# --- Grafana Admin -------------------------------------------------------
+vault_grafana_admin_password: "GRAFANA_ADMIN"

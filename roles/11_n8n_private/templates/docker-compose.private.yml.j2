@@ -1,0 +1,43 @@
+---
+services:
+  postgres-n8n:
+    image: postgres:16-alpine
+    container_name: postgres-n8n
+    restart: unless-stopped
+    user: "1002:1002"
+    networks: [agent-net]
+    environment:
+      POSTGRES_DB: "{{ vault_postgres.n8n_db }}"
+      POSTGRES_USER: "{{ vault_postgres.n8n_user }}"
+      POSTGRES_PASSWORD: "{{ vault_postgres.n8n_password }}"
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - "{{ n8n_postgres_data_dir }}:/var/lib/postgresql/data"
+
+  n8n-private:
+    image: n8nio/n8n:latest
+    container_name: n8n-private
+    restart: unless-stopped
+    user: "1002:1002"
+    networks: [agent-net]
+    depends_on: [postgres-n8n]
+    ports:
+      # Listen NUR auf Tailscale-IP (siehe inventory/host_vars/ai-server.yml)
+      - "{{ n8n_listen_address }}:{{ n8n_port }}:5678"
+    env_file: [.env]
+    volumes:
+      - "{{ n8n_data_dir }}:/home/node/.n8n"
+      - /opt/n8n/workflows-import:/workflows-import:ro
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+          cpus: "2.0"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5678/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  agent-net: { external: true }

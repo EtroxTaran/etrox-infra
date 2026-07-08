@@ -1,0 +1,21 @@
+---
+# n8n-edge — läuft auf Hetzner. KEIN Editor, KEINE Vault-Credentials.
+services:
+  n8n-edge:
+    image: n8nio/n8n:latest
+    container_name: n8n-edge
+    restart: unless-stopped
+    env_file: [.env]
+    ports:
+      - "5679:5678"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.n8n-gw.rule=Host(`{{ public_subdomains.n8n_gw }}`)"
+      - "traefik.http.routers.n8n-gw.entrypoints=websecure"
+      - "traefik.http.routers.n8n-gw.tls.certresolver=letsencrypt"
+      - "traefik.http.services.n8n-gw.loadbalancer.server.port=5678"

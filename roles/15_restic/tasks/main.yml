@@ -1,0 +1,89 @@
+---
+# 15_restic — Backups: lokales restic-Repo + rclone für Off-Site (Google Drive).
+
+- name: Restic + rclone schon via 00_base installiert
+  ansible.builtin.command: which restic rclone
+  changed_when: false
+
+- name: Ensure restic password file
+  ansible.builtin.copy:
+    dest: /etc/restic/password
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ vault_restic_password }}"
+  no_log: true
+
+- name: Ensure restic dirs
+  ansible.builtin.file:
+    path: /etc/restic
+    state: directory
+    mode: "0700"
+
+- name: Initialize restic repo (idempotent)
+  ansible.builtin.command: restic -r {{ restic_repo }} --password-file /etc/restic/password init
+  args:
+    creates: "{{ restic_repo }}/config"
+
+- name: Place rclone config (gdrive)
+  ansible.builtin.copy:
+    dest: /root/.config/rclone/rclone.conf
+    content: "{{ vault_rclone_config }}"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Render restic backup script
+  ansible.builtin.template:
+    src: restic-backup.sh.j2
+    dest: /usr/local/sbin/restic-backup
+    mode: "0750"
+
+- name: Render restic restore-smoke script
+  ansible.builtin.template:
+    src: restic-smoke.sh.j2
+    dest: /usr/local/sbin/restic-smoke
+    mode: "0750"
+
+- name: Install systemd timer for daily backup
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/restic-backup.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Daily restic backup
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/restic-backup
+
+- name: Install systemd timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/restic-backup.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Daily restic backup at 04:00
+      [Timer]
+      OnCalendar=*-*-* 04:00:00
+      Persistent=true
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable restic-backup timer
+  ansible.builtin.systemd:
+    name: restic-backup.timer
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Run first backup (block until done)
+  ansible.builtin.command: /usr/local/sbin/restic-backup
+  register: first_backup
+  changed_when: "'snapshot' in first_backup.stdout"
+
+- name: Run restore smoke test
+  ansible.builtin.command: /usr/local/sbin/restic-smoke
+  register: smoke
+  changed_when: false
+  failed_when: smoke.rc != 0

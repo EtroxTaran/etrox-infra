@@ -1,0 +1,58 @@
+---
+# 08_ollama — Ollama via systemd (kein Container, damit GPU direkt + niedrigere Latenz).
+
+- name: Install Ollama (official script)
+  ansible.builtin.shell: |
+    set -e
+    if ! command -v ollama >/dev/null; then
+      curl -fsSL https://ollama.com/install.sh | sh
+      echo CHANGED
+    fi
+  register: ollama_install
+  changed_when: "'CHANGED' in ollama_install.stdout"
+
+- name: Override ollama systemd unit (run as ollama user, models on /data)
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/ollama.service.d/override.conf
+    mode: "0644"
+    content: |
+      [Service]
+      User=ollama
+      Group=ollama
+      Environment="OLLAMA_MODELS={{ ollama_models_dir }}"
+      Environment="OLLAMA_HOST=0.0.0.0:11434"
+      Environment="OLLAMA_NUM_PARALLEL=2"
+      Environment="OLLAMA_KEEP_ALIVE={{ ollama_keep_alive | default('2m') }}"
+      Environment="CUDA_VISIBLE_DEVICES=0"
+  notify: restart ollama
+
+- name: Ensure /data/models is owned by ollama
+  ansible.builtin.file:
+    path: "{{ ollama_models_dir }}"
+    state: directory
+    owner: ollama
+    group: ollama
+    mode: "0755"
+
+- name: Reload systemd + enable + start ollama
+  ansible.builtin.systemd:
+    name: ollama
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Wait for Ollama API
+  ansible.builtin.uri:
+    url: http://localhost:11434/api/tags
+    status_code: 200
+  register: ollama_ready
+  retries: 30
+  delay: 2
+  until: ollama_ready.status == 200
+
+- name: Pull default models (idempotent — skipped if already present)
+  ansible.builtin.command: "ollama pull {{ item }}"
+  loop: "{{ ollama_default_models }}"
+  register: pull_result
+  changed_when: "'pulling' in pull_result.stdout or 'success' in pull_result.stdout"
+  become_user: ollama

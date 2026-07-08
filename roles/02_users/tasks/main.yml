@@ -1,0 +1,52 @@
+---
+# 02_users — Linux-User für Workload-Isolation.
+# UIDs sind explizit fixiert (1000-1006), damit Migration von R2D2 mit
+# UID-Mapping konsistent bleibt.
+
+- name: Ensure required groups exist (for users.groups membership)
+  ansible.builtin.group:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - docker
+    - video      # GPU-Zugriff (DaVinci, Ollama, Gaming)
+    - audio
+    - render     # /dev/dri render nodes
+    - plugdev
+    - games
+
+- name: Create system users
+  ansible.builtin.user:
+    name: "{{ item.name }}"
+    uid: "{{ item.uid }}"
+    comment: "{{ item.comment }}"
+    groups: "{{ item.groups | default([]) }}"
+    shell: "{{ item.shell | default('/bin/bash') }}"
+    create_home: "{{ item.create_home | default(true) }}"
+    state: present
+    append: true
+  loop: "{{ system_users }}"
+  loop_control:
+    label: "{{ item.name }} (uid {{ item.uid }})"
+
+- name: Create authorized_keys directory for admin user
+  ansible.builtin.file:
+    path: "/home/{{ admin_user }}/.ssh"
+    state: directory
+    owner: "{{ admin_user }}"
+    group: "{{ admin_user }}"
+    mode: "0700"
+
+- name: Pass admin SSH key (from local) to ai-server
+  ansible.posix.authorized_key:
+    user: "{{ admin_user }}"
+    state: present
+    key: "{{ lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default('', true) }}"
+  when: lookup('file', lookup('env', 'HOME') + '/.ssh/id_ed25519.pub', errors='ignore') | default('', true) != ''
+
+- name: Lingering enabled for service users (so user-services run after logout)
+  ansible.builtin.command: "loginctl enable-linger {{ item.name }}"
+  args:
+    creates: "/var/lib/systemd/linger/{{ item.name }}"
+  loop: "{{ system_users }}"
+  when: item.uid in [1001, 1002, 1003, 1004, 1006]   # agent, n8n, devrunner, ollama, surreal

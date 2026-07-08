@@ -1,0 +1,174 @@
+---
+# 04_nvidia_cuda — NVIDIA Driver + CUDA + nvidia-container-toolkit
+
+- name: Detect NVIDIA hardware
+  ansible.builtin.shell: lspci | grep -i nvidia
+  register: nv_lspci
+  changed_when: false
+  failed_when: false
+
+- name: Skip if no NVIDIA GPU
+  ansible.builtin.meta: end_play
+  when: nv_lspci.rc != 0
+
+- name: Install kernel headers + dkms
+  ansible.builtin.apt:
+    name:
+      - "linux-headers-{{ ansible_kernel }}"
+      - dkms
+      - pkg-config
+      - ubuntu-drivers-common
+    state: present
+    update_cache: true
+
+# --- Secure Boot Erkennung (DKMS-Module brauchen MOK-Enrollment) ---------
+- name: Detect Secure Boot state
+  ansible.builtin.command: mokutil --sb-state
+  register: sb_state
+  changed_when: false
+  failed_when: false
+
+- name: Warn if Secure Boot is enabled (NVIDIA DKMS braucht MOK-Enrollment)
+  ansible.builtin.debug:
+    msg: |
+      ⚠️ Secure Boot ist AKTIV. Der proprietäre NVIDIA-Treiber baut DKMS-Module,
+      die signiert/getrusted werden müssen. Optionen:
+        a) Canonical-signierte Pakete nutzen (apt 'nvidia-driver-{{ nvidia_driver_branch }}'
+           aus dem Ubuntu-Archiv laden meist vorsignierte Module) ODER
+        b) beim Treiber-Install MOK-Passwort setzen und nach Reboot im blauen
+           MokManager-Menü enrollen ODER
+        c) Secure Boot im BIOS temporär deaktivieren (siehe docs/HARDWARE-B850F.md).
+  when: "'enabled' in sb_state.stdout | default('')"
+
+# --- 32-bit Architektur für Proton/Steam-Vulkan -------------------------
+- name: Enable i386 multiarch (für 32-bit Vulkan/Proton)
+  ansible.builtin.command: dpkg --add-architecture i386
+  register: multiarch
+  changed_when: "'already' not in multiarch.stderr | default('')"
+  when: nvidia_install_32bit | default(true) | bool
+
+# Keyring statt des veralteten apt_key (apt-key ist deprecated/entfällt auf 24.04+).
+- name: Ensure apt keyrings dir exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+
+- name: Add NVIDIA CUDA repo key (ASCII-armored keyring)
+  ansible.builtin.get_url:
+    url: "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ansible_distribution_version | replace('.', '') }}/x86_64/3bf863cc.pub"
+    dest: /etc/apt/keyrings/cuda.asc
+    mode: "0644"
+
+- name: Add NVIDIA CUDA repo (signed-by keyring)
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/cuda.asc] https://developer.download.nvidia.com/compute/cuda/repos/ubuntu{{ ansible_distribution_version | replace('.', '') }}/x86_64/ /"
+    filename: cuda
+    state: present
+
+# Desktop-Workstation: wir wollen den DESKTOP-Treiber (voller Vulkan/GLX-GUI-Stack
+# für KDE + Steam/Proton), NICHT die -server-Variante. Der Paket-Suffix wird über
+# nvidia_driver_flavor gesteuert (desktop → kein Suffix, server → '-server').
+- name: Compute driver package suffix from flavor
+  ansible.builtin.set_fact:
+    nvidia_pkg_suffix: "{{ '-server' if (nvidia_driver_flavor | default('desktop')) == 'server' else '' }}"
+
+- name: Discover available NVIDIA driver branches (apt)
+  ansible.builtin.shell: |
+    apt-cache search '^nvidia-driver-[0-9]+{{ nvidia_pkg_suffix }}$' \
+      | awk '{print $1}' \
+      | sed 's/nvidia-driver-//;s/-server//' \
+      | sort -nr | uniq
+  register: nvidia_branches
+  changed_when: false
+
+- name: Pick driver branch (configured if available, else newest)
+  ansible.builtin.set_fact:
+    nvidia_driver_branch_effective: >-
+      {{ nvidia_driver_branch if nvidia_driver_branch in nvidia_branches.stdout_lines
+         else (nvidia_branches.stdout_lines | first) }}
+
+- name: Show chosen driver branch
+  ansible.builtin.debug:
+    msg: "NVIDIA driver: nvidia-driver-{{ nvidia_driver_branch_effective }}{{ nvidia_pkg_suffix }} (flavor: {{ nvidia_driver_flavor | default('desktop') }}, available: {{ nvidia_branches.stdout_lines | join(', ') }})"
+
+- name: Install NVIDIA driver (desktop branch) + Vulkan/GUI userspace
+  ansible.builtin.apt:
+    name:
+      - "nvidia-driver-{{ nvidia_driver_branch_effective }}{{ nvidia_pkg_suffix }}"
+      - libnvidia-egl-wayland1
+      - libvulkan1
+      - vulkan-tools
+      - mesa-vulkan-drivers
+    state: present
+    update_cache: true
+  notify: reboot required
+
+- name: Install 32-bit Vulkan userspace (Proton/Steam)
+  ansible.builtin.apt:
+    name:
+      - "libvulkan1:i386"
+      - "mesa-vulkan-drivers:i386"
+    state: present
+  when: nvidia_install_32bit | default(true) | bool
+  failed_when: false   # i386-Pakete erst nach Multiarch-Cache-Refresh sicher verfügbar
+
+# DRM-KMS für KDE Wayland. Ubuntu setzt modeset=1 zwar i.d.R. schon via Paket-
+# modprobe.d, aber wir setzen es defensiv selbst (überlebt Paket-Änderungen) und
+# ergänzen fbdev=1 für sauberen Konsolen-Handoff (weniger Black-Screen/Flicker).
+- name: Ensure NVIDIA DRM KMS enabled for Wayland (modeset + fbdev)
+  ansible.builtin.copy:
+    dest: /etc/modprobe.d/nvidia-kms.conf
+    mode: "0644"
+    content: |
+      # Auto-generated by ansible role 04_nvidia_cuda — KMS für KDE Wayland.
+      options nvidia-drm modeset=1 fbdev=1
+  notify:
+    - update initramfs
+    - reboot required
+
+- name: Install CUDA toolkit
+  ansible.builtin.apt:
+    name: "cuda-toolkit-{{ cuda_version | replace('.', '-') }}"
+    state: present
+
+- name: Add NVIDIA Container Toolkit repo key
+  ansible.builtin.shell: |
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+      gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+
+- name: Add NVIDIA Container Toolkit repo
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    content: |
+      deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://nvidia.github.io/libnvidia-container/stable/deb/$(ARCH) /
+    mode: "0644"
+
+- name: Install nvidia-container-toolkit
+  ansible.builtin.apt:
+    name: nvidia-container-toolkit
+    state: present
+    update_cache: true
+
+- name: Configure docker to use NVIDIA runtime
+  ansible.builtin.command: nvidia-ctk runtime configure --runtime=docker
+  changed_when: true
+  notify: restart docker
+
+- name: Verify nvidia-smi works
+  ansible.builtin.command: nvidia-smi
+  register: nv_smi
+  changed_when: false
+  failed_when: false
+
+- name: Show nvidia-smi
+  ansible.builtin.debug:
+    var: nv_smi.stdout_lines
+  when: nv_smi.rc == 0
+
+- name: Warn if GPU not yet active (likely needs reboot)
+  ansible.builtin.debug:
+    msg: "GPU-Treiber ist installiert, aber nvidia-smi schlägt fehl. → Reboot erforderlich."
+  when: nv_smi.rc != 0

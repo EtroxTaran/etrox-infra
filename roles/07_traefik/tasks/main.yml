@@ -1,0 +1,38 @@
+---
+# 07_traefik — Traefik v3 als interner Reverse Proxy.
+# Auf Hetzner läuft Dokploy bereits mit eigenem Traefik; auf AI-Server brauchen
+# wir einen schlanken internen Proxy, der Tailscale-Hostnamen + ACME (DNS-01)
+# kann. ACME via DNS-01 vermeidet Public-HTTP-Validation.
+
+- name: Create traefik directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - /opt/traefik
+    - /opt/traefik/config
+    - /opt/traefik/letsencrypt
+
+- name: Render traefik static config
+  ansible.builtin.template:
+    src: traefik.yml.j2
+    dest: /opt/traefik/traefik.yml
+    mode: "0644"
+
+- name: Render traefik dynamic config (file provider)
+  ansible.builtin.template:
+    src: dynamic.yml.j2
+    dest: /opt/traefik/config/dynamic.yml
+    mode: "0644"
+
+- name: Render traefik docker-compose
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/traefik/docker-compose.yml
+    mode: "0644"
+
+- name: Start traefik
+  community.docker.docker_compose_v2:
+    project_src: /opt/traefik
+    state: present

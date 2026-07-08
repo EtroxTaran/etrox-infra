@@ -1,0 +1,34 @@
+{
+  "name": "Discord CI Bridge",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "github-ci",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-1",
+      "name": "GitHub Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.DISCORD_CI_WEBHOOK }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"embeds\": [{\n    \"title\": \"{{ $json.body.repository.name }} — {{ $json.body.workflow_run.conclusion }}\",\n    \"color\": {{ $json.body.workflow_run.conclusion === 'success' ? 3066993 : 15158332 }},\n    \"url\": \"{{ $json.body.workflow_run.html_url }}\",\n    \"fields\": [\n      { \"name\": \"Branch\", \"value\": \"{{ $json.body.workflow_run.head_branch }}\", \"inline\": true },\n      { \"name\": \"Actor\",  \"value\": \"{{ $json.body.workflow_run.actor.login }}\", \"inline\": true }\n    ]\n  }]\n}"
+      },
+      "id": "http-1",
+      "name": "Post to Discord",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300]
+    }
+  ],
+  "connections": {
+    "GitHub Webhook": { "main": [[{ "node": "Post to Discord", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

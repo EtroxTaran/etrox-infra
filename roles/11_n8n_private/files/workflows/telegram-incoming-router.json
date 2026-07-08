@@ -1,0 +1,50 @@
+{
+  "name": "Telegram Incoming Router (Security Gate)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "telegram-private",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-1",
+      "name": "Webhook (from edge)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Security Gate: Nur Nico/Sabine Chat-IDs erlauben.\nconst allowedIds = [\n  parseInt($env.NICO_CHAT_ID),\n  parseInt($env.SABINE_CHAT_ID)\n];\nconst chatId = $json.body?.message?.chat?.id;\nif (!allowedIds.includes(chatId)) {\n  // Verwerfen, kein Forward\n  return [];\n}\nreturn [$input.item];"
+      },
+      "id": "code-1",
+      "name": "Whitelist Check",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.body.message.from.id }}",
+              "operation": "equals",
+              "value2": "={{ $env.NICO_CHAT_ID }}"
+            }
+          ]
+        }
+      },
+      "id": "if-1",
+      "name": "Nico oder Sabine?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (from edge)": { "main": [[{ "node": "Whitelist Check", "type": "main", "index": 0 }]] },
+    "Whitelist Check":     { "main": [[{ "node": "Nico oder Sabine?", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

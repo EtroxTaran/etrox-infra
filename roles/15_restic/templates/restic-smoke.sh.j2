@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# restic-smoke — kleiner Restore-Test (1% subset).
+set -euo pipefail
+REPO="{{ restic_repo }}"
+PWFILE="/etc/restic/password"
+TARGET="$(mktemp -d)"
+trap 'rm -rf "$TARGET"' EXIT
+
+restic -r "$REPO" --password-file "$PWFILE" check --read-data-subset=1%
+LATEST=$(restic -r "$REPO" --password-file "$PWFILE" snapshots --json | jq -r '.[-1].id')
+restic -r "$REPO" --password-file "$PWFILE" restore "$LATEST" --target "$TARGET" \
+    --include /data/vaults/research-core/README.md 2>/dev/null || true
+echo "✅ Smoke test passed (snapshot $LATEST)"

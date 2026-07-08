@@ -1,0 +1,67 @@
+---
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    networks: [monitoring-net]
+    volumes:
+      - /opt/monitoring/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    networks: [monitoring-net]
+    ports:
+      - "{{ ai_server_tailnet_ip | default('127.0.0.1') }}:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "{{ vault_grafana_admin_password }}"
+      GF_SERVER_ROOT_URL: "http://grafana.{{ ai_server_hostname }}.{{ tailnet_name }}"
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    restart: unless-stopped
+    networks: [monitoring-net]
+    volumes:
+      - loki-data:/loki
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    restart: unless-stopped
+    networks: [monitoring-net]
+    pid: host
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+
+  nvidia-exporter:
+    image: utkuozdemir/nvidia_gpu_exporter:latest
+    container_name: nvidia-exporter
+    restart: unless-stopped
+    networks: [monitoring-net]
+    runtime: nvidia
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  loki-data:
+
+networks:
+  monitoring-net: { external: true }
