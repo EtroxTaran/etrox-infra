@@ -1,0 +1,10 @@
+[Unit]
+Description=etrox github-ops nightly
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+RandomizedDelaySec=900
+Persistent=true          # nachholen, wenn bb8 zur geplanten Zeit aus war
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Keep the watcher app token fresh (45-min refresh, token lives 60 min)
+
+[Timer]
+OnActiveSec=5s
+OnUnitActiveSec=45min
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

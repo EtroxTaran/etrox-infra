@@ -1,0 +1,48 @@
+# Vorlage für .github/dependabot.yml
+#
+# Audit-Befund: 5 von 6 offenen PRs in x-ai-stack waren einzelne Dependabot-PRs,
+# davon zwei aus demselben Prisma-Release-Zug. Gruppierung macht daraus 1-2 PRs
+# pro Woche. Ein Backlog aus Dependency-PRs ist der Ort, an dem echte
+# Security-Updates untergehen.
+version: 2
+
+updates:
+  # --- Actions selbst: hält die SHA-Pins aktuell ---
+  # Ohne diesen Block bedeutet SHA-Pinning, dass Actions für immer alt bleiben.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(deps)"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      prisma:
+        patterns: ["@prisma/*", "prisma"]
+      radix-shadcn:
+        patterns: ["@radix-ui/*", "shadcn*", "class-variance-authority", "tailwind-merge"]
+      next-react:
+        patterns: ["next", "react", "react-dom", "@types/react*"]
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+    commit-message:
+      prefix: "chore(deps)"
+
+  - package-ecosystem: pip
+    directory: "/packages/ai-review-pipeline"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-minor-patch:
+        update-types: ["minor", "patch"]

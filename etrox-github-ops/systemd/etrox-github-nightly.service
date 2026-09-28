@@ -1,0 +1,29 @@
+[Unit]
+Description=etrox github-ops nightly (Backup, Storage, Invarianten)
+After=network-online.target
+Wants=network-online.target
+
+# User-Unit statt System-Unit: sudo ist auf bb8 Nico-vorbehalten, Linger ist
+# aktiv, und alle drei Schritte brauchen nur User-Rechte.
+[Service]
+Type=oneshot
+Environment=ETROX_ENV=%h/.config/etrox/github.env
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+WorkingDirectory=%h/etrox-github-ops
+
+# Reihenfolge ist Absicht: erst sichern, dann aufräumen, dann prüfen.
+# Wer vor dem Backup aufräumt, löscht ohne Netz.
+ExecStart=/bin/bash -c './ops/backup-mirror.sh'
+ExecStart=/bin/bash -c './ops/storage-cleanup.sh --purge'
+ExecStart=/bin/bash -c './ops/verify-invariants.sh'
+
+# Der Invarianten-Check meldet Verstöße per Issue und endet mit != 0.
+# Das ist kein Fehler des Dienstes — der Timer soll deswegen nicht als failed gelten.
+SuccessExitStatus=0 1
+
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=default.target

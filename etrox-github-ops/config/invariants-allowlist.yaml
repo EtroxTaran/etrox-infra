@@ -1,0 +1,141 @@
+# Invarianten-Allowlist / Stale-Scope — owner + ISO-Ablauf Pflicht.
+# Quelle: Leah BRIEF Q2 2026-09-28 (Riker adjudicated) · SRE toil / Dependabot snooze pattern.
+#
+# - allowlist: unterdrückt passende Verstöße bis expiry (danach wieder NEU / Delta).
+# - stale: bekannte Soll-Drift (Visibility o.ä.); gleiches Matching, eigene Semantik.
+# - match: kind (+ optional repo). Ohne repo = alle Repos für diesen kind.
+# - Expired Einträge werden ignoriert (drop) → Violation resurfaced.
+#
+# verify-invariants.sh liest diese Datei. Agent darf Einträge mit Begründung ergänzen;
+# expiry nie ohne Review verlängern (Geordi/Nico).
+
+version: 1
+
+allowlist:
+  # --- branch_safety_rules: deletion + non_fast_forward fehlen flächig ---
+  # Ursache: nach 2026-07-29 baseline-content Switch nicht re-applied (apply-rulesets.sh).
+  - kind: branch_safety_rules
+    repo: EtroxTaran/immo-quick
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/immo-portfolio-smart
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/ai-portal
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/hive
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/cv-visualizer
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/otter-und-stein
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/hive-showcase-raw
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/fetching-best-vids
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/etrox-de
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/research-workflow-n8n
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/ai-server-provisioning
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/Uiplatformguide
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/klubhaus-elf
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/llm-wiki-system-plan
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/nexus-portal
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/hive-showcase
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/ai-research-workflow
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/etrox-infra
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/conductor
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/forge
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+  - kind: branch_safety_rules
+    repo: EtroxTaran/miniflux
+    owner: geordi
+    expiry: "2026-12-28"
+    reason: "Rulesets pending re-apply after baseline-content switch"
+
+  # --- no_deletion: API nicht auffindbar (Zugriff/Rename) — kurz fristen ---
+  - kind: no_deletion
+    repo: EtroxTaran/x-ai-stack
+    owner: scotty
+    expiry: "2026-10-28"
+    reason: "Nightly: API not found — App install / rename / access; short fuse"
+
+# Stale Soll-Visibility (repos.yaml sagt public, live private). Bis Review unterdrückt.
+stale:
+  - kind: visibility_locked
+    repo: EtroxTaran/hive-showcase
+    owner: nico
+    expiry: "2026-12-28"
+    reason: "Soll public in repos.yaml; live private — confirm intentional or fix Soll"
+  - kind: visibility_locked
+    repo: EtroxTaran/conductor
+    owner: nico
+    expiry: "2026-12-28"
+    reason: "Soll public in repos.yaml; live private — confirm intentional or fix Soll"
