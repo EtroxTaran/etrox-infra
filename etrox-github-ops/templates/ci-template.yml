@@ -1,0 +1,55 @@
+# Workflow-Vorlage mit den drei Regeln, die im Audit gefehlt haben:
+#   1. timeout-minutes    -> kein Job hängt je wieder 2 h 34 m in der Queue
+#   2. retention-days: 3  -> Artifacts sind der einzige echte Kostenposten
+#   3. Actions SHA-gepinnt -> Tags sind vom Maintainer jederzeit umbiegbar
+#
+# Runner-Wahl, bewusst:
+#   ubuntu-latest  für alles ohne lokale Secrets/Modelle. Auf public Repos gratis,
+#                  auf private innerhalb der 3.000 Pro-Freiminuten. Keine Queue.
+#   self-hosted    NUR wenn der Job lokale Secrets, Modelle oder das Vault braucht.
+# Die Mischung beider im selben Workflow war der Fehler in klubhaus-elf.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read          # Default bleibt minimal; einzelne Jobs erhöhen gezielt
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true    # spart Minuten und Storage bei schnellen Nachpushes
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+        with: { version: 9 }
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with: { node-version: 22, cache: pnpm }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+
+      - uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        if: failure()                # Artifacts nur wenn sie jemand braucht
+        with:
+          name: test-output
+          path: ./test-results
+          retention-days: 3          # NICHT weglassen: Default ist 90 Tage
+
+  # Beispiel für einen Job, der zu Recht auf bb8 gehört
+  ai-review:
+    runs-on: [self-hosted, Linux, X64, bb8]
+    timeout-minutes: 30              # auch hier: nie unbegrenzt warten
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: ./scripts/ai-review.sh   # nutzt lokales LiteLLM, keine Cloud-Secrets nötig

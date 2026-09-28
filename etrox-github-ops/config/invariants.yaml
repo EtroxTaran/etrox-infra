@@ -1,0 +1,54 @@
+# Die fünf Grenzen aus HANDOFF.md Abschnitt 6, in maschinenlesbarer Form.
+# verify-invariants.sh prüft sie nächtlich und öffnet bei Verstoß ein Issue.
+#
+# Der Agent darf jede Regel in rulesets/ ändern. Diese Datei nicht.
+# Wenn er sie für falsch hält: Issue mit Begründung, Nico entscheidet.
+
+invariants:
+
+  visibility_locked:
+    beschreibung: >
+      Kein Repo wechselt von private nach public. Die Soll-Sichtbarkeit steht
+      in repos.yaml. Abweichung = sofortiges Issue, keine automatische Korrektur
+      (Zurückstellen auf private kann laufende Klone nicht zurückholen —
+      das muss ein Mensch bewerten).
+    schweregrad: kritisch
+    auto_fix: false
+
+  no_deletion:
+    beschreibung: >
+      Kein Repo wird gelöscht. Archivieren ist erlaubt und erwünscht.
+      Prüfung: jedes Repo aus repos.yaml muss über die API auffindbar sein.
+    schweregrad: kritisch
+    auto_fix: false
+
+  branch_safety_rules:
+    beschreibung: >
+      Auf jedem Default-Branch müssen die Ruleset-Regeln 'deletion' und
+      'non_fast_forward' aktiv sein. Alle anderen Regeln darf der Agent ändern.
+      Diese zwei sind der Grund, warum ein Fehler reparierbar bleibt.
+    schweregrad: hoch
+    auto_fix: true    # fehlt eine der beiden -> apply-rulesets.sh nachziehen
+
+  storage_budget:
+    beschreibung: >
+      Actions-Storage bleibt unter dem Pro-Freikontingent.
+      Überschreitung heißt: Retention oder upload-artifact-Steps sind falsch.
+    schwelle_gb: 2
+    schweregrad: mittel
+    auto_fix: true    # storage-cleanup.sh --purge
+
+  backup_freshness:
+    beschreibung: >
+      Der jüngste Mirror jedes Repos ist nicht älter als 48 Stunden.
+      Ohne frisches Backup ist die volle Autonomie des Agenten nicht gedeckt —
+      diese Invariante ist die Gegenleistung für seine Rechte.
+    schwelle_stunden: 48
+    schweregrad: hoch
+    auto_fix: true    # backup-mirror.sh sofort nachziehen
+
+# Wohin Verstöße gemeldet werden
+melden_an:
+  repo: EtroxTaran/etrox-infra
+  labels: [governance, automated]
+  titel_prefix: "[invariant]"

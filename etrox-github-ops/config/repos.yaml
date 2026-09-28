@@ -1,0 +1,57 @@
+# Welches Repo bekommt welches Ruleset-Profil — und wem gehört es.
+#
+# Format:  <repo>: <profil> [| owner=<owner>] [| visibility=<private|public>]
+# Fehlt owner, gilt GITHUB_OWNER aus github.env (EtroxTaran).
+# `visibility` ist die Soll-Sichtbarkeit — verify-invariants.sh schlägt Alarm,
+# wenn ein Repo davon abweicht. Das ist Grenze 1 aus dem HANDOFF.
+
+repos:
+  # --- Code-Profil: AI-Review-Gate ---
+  x-ai-stack:          baseline-code | visibility=private
+  immo-quick:          baseline-code | visibility=private
+  immo-portfolio-smart: baseline-code | visibility=private
+  ai-portal:           baseline-code | visibility=private
+  hive:                baseline-code | visibility=private
+  cv-visualizer:       baseline-code | visibility=private
+  # content-production (ADR-048): keine Review-/PR-Gates — nur die Invariante 3
+  # (deletion + non_fast_forward). baseline-code wuerde den Direct-Push-Workflow
+  # der Content-Pipeline brechen.
+  otter-und-stein:     baseline-content | visibility=private
+  # hive-showcase-raw stand faelschlich unter `archived`, ist aber live
+  # (archived=false, Commit 2026-07-27) und das Staging-Repo fuer den spaeteren
+  # public Snapshot. Damit lief es ohne Backup und ohne visibility-Invariante —
+  # ausgerechnet dort, wo ein versehentliches Public-Flip am teuersten waere.
+  # baseline-content statt -docs: schuetzt deletion/non_fast_forward, erzwingt
+  # aber keine PR-Gates auf einem Direct-Push-Kurationsrepo.
+  hive-showcase-raw:   baseline-content | visibility=private
+  fetching-best-vids:  baseline-code | visibility=private
+  etrox-de:            baseline-code | visibility=private
+  research-workflow-n8n: baseline-code | visibility=private
+  ai-server-provisioning: baseline-code | visibility=private
+  Uiplatformguide:     baseline-code | visibility=private
+
+  # --- Docs-Profil: docs-check + linear-id ---
+  # klubhaus-elf wird kommerziell -> private, bleibt auf dem persoenlichen Account.
+  # Pro deckt Rulesets auf privaten Repos ab; eine Free-Org taete das NICHT.
+  # Phase 5 durchgefuehrt 2026-07-28: Alerts gescrubbt+resolved, keine Forks,
+  # Archive-Program-Haken entfernt, PATCH private=true via etrox-admin.
+  klubhaus-elf:        baseline-docs | visibility=private
+  llm-wiki-system-plan: baseline-docs | visibility=private
+  nexus-portal:        baseline-docs | visibility=private
+
+  # --- Public, aber „review before making public" laut Beschreibung ---
+  # Erst nach gitleaks-Scan über die volle Historie bestätigen (Audit-Punkt 05).
+  hive-showcase:       baseline-docs | visibility=public
+  ai-research-workflow: baseline-docs | visibility=public
+  etrox-infra:         baseline-code | visibility=public
+  conductor:           baseline-code | visibility=public
+  forge:               baseline-docs | visibility=public
+  miniflux:            baseline-code | visibility=public
+
+# Archiviert — bewusst kein Ruleset, kein Backup-Zwang, keine Invarianten-Prüfung.
+archived:
+  - ai-engineering-stack
+  - hermes
+  - ai-server
+  - agent-stack
+  - ai-review-pipeline

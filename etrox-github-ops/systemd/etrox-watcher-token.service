@@ -1,0 +1,9 @@
+[Unit]
+Description=Refresh the etrox-ops app token for ai-review watchers (dedicated GH_CONFIG_DIR)
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+# sops liegt in ~/.local/bin — die systemd-User-Default-PATH kennt das nicht
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/etrox-github-ops/ops/refresh-watcher-token.sh
